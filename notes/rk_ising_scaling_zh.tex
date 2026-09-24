@@ -1,0 +1,546 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=23mm]{geometry}
+\usepackage{fontspec,xeCJK}
+\setmainfont{DejaVu Serif}
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+\setCJKmainfont[AutoFakeBold=2,AutoFakeSlant=0.15]{Droid Sans Fallback}
+\setCJKmonofont{Droid Sans Fallback}
+\xeCJKDeclareCharClass{Default}{"201C,"201D}
+\usepackage{amsmath,amssymb,booktabs,array,longtable,graphicx,xcolor,tikz}
+\usetikzlibrary{arrows.meta,positioning}
+\usepackage[colorlinks=true,linkcolor=blue!60!black,urlcolor=blue!60!black]{hyperref}
+\setlength{\emergencystretch}{3em}
+\setlength{\parskip}{0.4em}
+\renewcommand{\contentsname}{目录}
+\renewcommand{\abstractname}{摘要}
+\renewcommand{\refname}{参考文献}
+\newcommand{\tS}{\widetilde S}
+\newcommand{\xb}{\xi_\beta}
+\newcommand{\xc}{\xi_\chi}
+\newcommand{\note}[1]{\par\noindent\colorbox{blue!5}{\parbox{0.95\linewidth}{#1}}\par}
+\title{RK--Ising 的 $\widetilde S$ 为什么没有给出同一个对数斜率？\\
+\large 物理关联长度、有限尺寸、有限 $\chi$ 与 replica junction 的区分}
+\author{项目解释与数据复核 note}
+\date{2026 年 9 月 18 日}
+\begin{document}
+\maketitle
+\begin{abstract}
+图中三个最陡三点斜率分别为 $-0.5612$、$-0.1477$ 和 $-0.4310$，
+对应无序相、有序相与临界有限尺寸 MC。本文重读绘图代码与原始标量表，复现这三个数，
+并增加窗口与 $\chi$ 敏感性检查。核心结论不是“普适性失效”，也不是“全是数值误差”，
+而是：图上比较了三个不同极限路径下的\emph{有限窗口有效斜率}，尚未证明它们等于
+同一渐近系数。相别、replica 缺陷、几何与 sector 不是一个正的关联长度能完全编码的。
+在这些条件匹配、截断误差消除并进入渐近区间后，同一个局域临界 junction 的对数系数
+仍有理由相同；现有数据既没有确立这个共同系数，也没有排除它。
+本文特别纠正旧解释中的三点：对数自由能不要求 marginal 算符；线张力抵消不自动证明
+角点对数项抵消；有限温差处的有序相非零磁矩并不等于算法错误。
+\end{abstract}
+\tableofcontents
+
+\section{先回答：原来的直觉哪部分对，哪部分太强？}
+“接近同一个临界点，只有一个大的体关联长度，所以只要横轴换成 $\ln\xi$，
+所有曲线就应有同一个斜率”包含三个不同命题：
+\begin{enumerate}
+\item \textbf{一个长度控制体临界标度。}这是很有用的起点，但正数 $\xi$ 不记录
+温度偏离的符号，也不指定边界条件、replica 缺陷或所选真空。
+\item \textbf{$\tS$ 的主导奇异项是对数。}这需要针对该 partition-function ratio
+证明或在渐近数值区间验证；它不是“无量纲量”的自动结论。
+\item \textbf{图中拟合到的斜率就是这个主导系数。}这还要求误差受控、窗口足够大、
+局部斜率形成平台，以及 MC 与无限网络比较的是同一个归一化几何量。
+\end{enumerate}
+\note{更合理的待检验假设是：\emph{固定同一种 replica junction、几何和 sector，
+在合适的双重极限下，$\tS=b_J\ln(\ell_{\mathrm{IR}}/a)+B+o(1)$。}
+这里 $b_J$ 可以普适，但这不要求有限尺度整条曲线都只由 $\xi$ 唯一决定。}
+“普适”也不是“所有熵、所有相、所有边界都用同一个数”。它指的是在相同临界固定点
+及相同 observable/缺陷类中，不依赖微观实现。本文不预设 $b_J$ 的数值。
+
+\section{到底在比较什么量？}
+\subsection{固定定义，避免把三个不同的熵混起来}
+当前主 note 与 MC 代码共同采用
+\begin{align}
+ S_2(X)&=-\ln\frac{Z_{2X}}{Z_1^2},\qquad
+ S_2^{(3)}=-\frac12\ln\frac{Z_4}{Z_1^4},\\
+ \tS&=2S_2^{(3)}-S_2(A)-S_2(B)-S_2(C)
+ =-\ln Q,\qquad
+ Q=\frac{Z_4 Z_1^2}{Z_{2A}Z_{2B}Z_{2C}}.\label{eq:def}
+\end{align}
+所有对数为自然对数。$S_2^{(3)}$ 是三方 replica 量，不是三阶 Rényi 熵。
+这是相减组合，负数本身不构成错误。无限网络保存的各个局部 $S_2,S_3$ 分量又做了
+直边参考扣除；它们不是有限密度矩阵的正熵，必须用式~\eqref{eq:def} 的同一组合比较。
+若另一篇文献定义的是 $S_2^{(3)}-\frac12\sum_XS_2(X)$，所有数值及斜率差一倍。
+本次 MC 与 VUMPS 定义相同，不能用这个约定差解释所见差异。
+
+令 $F_j=-\ln Z_j$，则
+\begin{equation}
+ \tS=F_4+2F_1-F_{2A}-F_{2B}-F_{2C}.\label{eq:freeenergy}
+\end{equation}
+因此最适合分析它的语言是\textbf{replica 网络的自由能差}，而不是直接套用
+一维单区间纠缠熵的 $c/3$ 或 $c/6$。
+
+\subsection{三种横轴代表三种不同操作}
+\begin{center}\small
+\begin{tabular}{p{.20\linewidth}p{.32\linewidth}p{.36\linewidth}}
+\toprule
+数据 & 真正改变什么 & 必须控制的额外条件\\
+\midrule
+无限网络，扫 $\beta$ & 改变波函数及物理质量，$\xb$ 随之改变 & $\chi$、sector、replica 收缩误差\\
+临界 MC，扫 $L$ & 固定 $\beta_c$，改变开放正方形的大小 & 外边界、形状、统计与积分误差\\
+临界网络，扫 $\chi$ & 固定波函数，改变有限纠缠/收缩截断 & 有效截断长度、诱导对称性破缺\\
+\bottomrule
+\end{tabular}
+\end{center}
+把 $\ln L$ 和 $\ln\xb$ 画在同一坐标上，是有用的比较，但\textbf{不是已经完成
+finite-size scaling collapse}。$L=c_0\xb$ 若只差常数，会改变截距而不改变纯对数斜率；
+它不能把三条弯曲曲线自动变成同一条线。
+
+\section{这张图的数据复核：确定的事实}
+\subsection{确实是“最陡连续三点”，不是预先指定的渐近窗口}
+旧脚本 \path{code2d/lmps/vumps/production/plot_physical_xi_chi16_with_fits.py}
+遍历全部连续三点，以最负 OLS 斜率选窗。新复核完全重现其数据筛选与 MC pooling：
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+序列 & 拟合范围 & 斜率 & $\ln(x_{\max}/x_{\min})$\\
+\midrule
+VUMPS 无序相，$\chi=16$ & $\xb=24.53$--$81.45$ & $-0.561166$ & $1.200$\\
+VUMPS 有序相，$\chi=16$ & $\xb=148.41$--$301.09$ & $-0.147678$ & $0.707$\\
+MC，$\beta_c$ & $L=48$--$80$ & $-0.431015$ & $0.511$\\
+\bottomrule
+\end{tabular}
+\end{center}
+它们连一个共同长度区间都没有。“所有曲线用同一个选窗规则”只避免人工选点，
+\textbf{并没有消除极值选择偏差，也没有把局部最大下降率变成普适系数}。
+对带噪声的 MC，从许多窗口中挑最负的斜率还会偏向向下的噪声波动。
+
+另一个可复现问题：旧脚本开头注释说“不分辨物理长度的区间不进入拟合”，
+但实际计算出的 \texttt{sat\_x} 并未用于 \texttt{steepest(X,Y)} 的筛选。
+\textbf{所以不能把该图的拟合当成已通过有限-$\chi$ 窗口筛选。}本 note 不覆盖旧图，
+而是保存独立复核记录。
+
+\subsection{固定窗口与增大 $\chi$ 后，数值如何变化？}
+\begin{center}\small
+\begin{tabular}{llrr}
+\toprule
+方法 & 区间/规则 & 无序相斜率 & 有序相斜率\\
+\midrule
+VUMPS $\chi=16$ & 同一实际 $\xb=24.53$--$81.45$ & $-0.56117$ & $-0.12178$\\
+VUMPS $\chi=32$ & 同一实际 $\xb=24.53$--$81.45$ & $-0.64284$ & $-0.12492$\\
+CTMRG $\chi=16$ & 目标窗口 $13\le\xb\le30$ & $-0.40433$ & $-0.08899$\\
+CTMRG $\chi=24$ & 目标窗口 $13\le\xb\le30$ & $-0.39951$ & $-0.09101$\\
+\bottomrule
+\end{tabular}
+\end{center}
+CTMRG 两相的实际节点并不完全相同：无序相约 $13.49$--$28.60$，有序相约
+$13.51$--$29.07$；表中没有插值出新的观测。它支持的是\emph{相近有限窗口内相别差异
+稳定存在}，不是已测得两套不同的渐近系数。VUMPS 无序相同窗从 16 到 32 改变约
+$14.6\%$，有序相约 $2.6\%$。两种现象必须同时承认：
+\begin{itemize}
+\item 有些下降区间仍明显受有限 $\chi$ 影响；
+\item 在相对稳定的小长度窗口，两相依然有不同的交叉函数，不能全归因于截断。
+\end{itemize}
+这里还必须特别澄清一个容易误读之处：图中的 VUMPS 与 CTMRG 曲线在相同物理
+$\xb$ 上是相符的；上表的斜率不能用来宣称两种算法不一致。VUMPS 的
+$24.53$--$81.45$ 区间与 CTMRG 的 $13$--$30$ 目标窗口不是同一个区间，而且
+CTMRG 的有序相在 $30$ 之后缺少落在 VUMPS 区间内的节点。对同一 CTMRG 序列改用
+$16$--$90$ 的规则时，无序相斜率变为 $-0.57242$（与 VUMPS 的 $-0.56117$
+同量级）；有序相仍只有 $16.51$--$29.07$ 的三个节点，因此不能称为同窗比较。
+这说明表中数值差异主要反映曲线的有限尺度曲率、节点采样和拟合窗口，而不是
+VUMPS 与 CTMRG 对同一数据给出了不同的物理曲线。若要比较算法，必须先把两者
+插值到共同的 $\ln\xb$ 区间，或直接比较逐点的 $\widetilde S(\xb)$ 残差，再讨论斜率。
+这里是对旧标量表的复核，不是重新认证所有旧网络收缩；不同 $\chi$ 的相近结果也不是
+无限-$\chi$ 误差界。CTMRG 三点窗口宽度和节点密度与 VUMPS 不同，二者的“最陡值”
+更不能直接当作算法差异。
+在原图有序相选定的同一 $\xb=148.41$--$301.09$ 窗口，$\chi=32$ 的斜率为
+$-0.16248$，比 $\chi=16$ 的 $-0.14768$ 又改变约 $10\%$。
+
+\subsection{MC 的 $-0.431$ 也不是唯一斜率}
+\begin{center}\small
+\begin{tabular}{lrr}
+\toprule
+固定窗口与拟合方式 & 斜率 & 条件统计标准误\\
+\midrule
+$L=48$--$80$，OLS（原图） & $-0.43102$ & $0.05141$\\
+$L=24$--$128$，OLS & $-0.36681$ & $0.00873$\\
+$L=32$--$128$，OLS & $-0.37303$ & $0.01156$\\
+$L=48$--$128$，OLS & $-0.36931$ & $0.01775$\\
+$L=24$--$128$，WLS & $-0.35505$ & $0.00593$\\
+$L=48$--$128$，WLS & $-0.38067$ & $0.01617$\\
+\bottomrule
+\end{tabular}
+\end{center}
+OLS 等权，WLS 用存储误差的逆方差加权。原图的 MC pooling 混合了不同 GL 阶数、
+路径方向等旧运行；复核为重现原图而保留这个规则，\textbf{不是重新验证这些运行的
+独立性或系统误差}。上表标准误把 pooled 尺寸点当作独立，传播已有误差；它不包含
+选窗偏差、临界慢化、积分偏差或拟合模型误差。
+例如 $24$--$128$ 的 WLS 和 OLS 不同，说明小尺寸权重会影响结论；
+不能从较小的形式标准误宣称系数已精确确定。
+
+\subsection{有序相磁矩的旧解释需要纠正}
+原图标注将 $m\simeq0.56$--$0.51$ 与 $\beta_c$ 的零磁矩比较。
+但这几个点不在 $\beta_c$；应比较\emph{相同 $\beta$} 的精确值：
+\begin{center}\small
+\begin{tabular}{rrrrr}
+\toprule
+$\beta$ & $\xb$ & $\xi_{\rm bnd}$ & $|m|_{\chi=16}$ & $m_{\rm exact}(\beta)$\\
+\midrule
+0.44152954 & 148.41 & 71.40 & 0.558818 & 0.558627\\
+0.44142526 & 169.36 & 77.49 & 0.549802 & 0.549525\\
+0.44110207 & 301.09 & 106.44 & 0.512691 & 0.511504\\
+\bottomrule
+\end{tabular}
+\end{center}
+这些磁矩很接近正确的有序相结果。\textbf{它们不证明这段已失真。}
+关联长度更敏感：上述三点在 $\chi=32$ 的 $\xi_{\rm bnd}$ 分别变为
+$102.06,113.68,175.10$，而磁矩进一步接近精确值。因此不能把“磁矩准确”当成
+“谱长度与 junction 已收敛”。仍需看对应通道和 $\chi$ 收敛；“$\xi_{\rm bnd}<\xb$”也不宜在
+未校准通道与每步物理距离前被当成普适判据。无序相则不同：零场真实热力学态
+$\beta<\beta_c$ 应有零自发磁矩；那里数值 $|m|\ne0$ 才是截断/分支选择的重要警报。
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=\linewidth]{../results/RK_Ising/scaling_interpretation/scaling_diagnostics.pdf}
+\caption{本次从保存数据重新生成的诊断图。(a) 固定 $\chi$ 的物理长度扫描；
+(b) CTMRG 的连续三点斜率随窗口漂移；没有把漂移区间强行命名为普适常数；
+(c) 边界谱长度与输入的精确物理长度，两条点线仅作尺度参考，不强制不同通道相等；
+(d) 临界 MC 的固定窗口拟合。图中的旧 TN 表尚不是本次 bare 验证的全部结果，
+因此这是缩放分析，不是网络正确性的独立认证。}
+\label{fig:data}
+\end{figure}
+
+\section{为什么 $\xi$ 不能单独区分两相？}
+\subsection{质量的绝对值相同，质量的符号不同}
+设 $t=\beta-\beta_c$。$\xb\sim A_\pm|t|^{-\nu}$ 只记录距离临界点的大小，
+不记录 $t$ 的符号。两相有不同的真空、序参量和相关函数振幅。
+因此一般允许
+\begin{equation}
+ \tS_{\pm}=\mathcal F_{\pm}(\xb/a,\ldots),\qquad
+ \mathcal F_+\ne\mathcal F_-.
+\end{equation}
+甚至在 bulk universality class 相同的情况下，同一个局部长度也不能指定完整的
+转移矩阵本征向量、与 replica 缺陷的重叠及 junction 收缩振幅。
+\textbf{一个谱隙不是完整的边界态。}
+
+这不与“两个相最终有相同的 $b_J$”矛盾：
+\begin{equation}
+ \tS_\pm=b_J\ln(\xb/a)+B_\pm+d_\pm(\xb/a)^{-\omega}+\cdots
+\end{equation}
+已允许有限 $\xi$ 的不同斜率、不同截距，甚至加入几个不同符号的修正后出现峰谷。
+要由有限窗的差异否定共同 $b_J$，必须证明修正项已足够小。
+
+\subsection{物理长度、边界谱长度、replica 长度不是同一个定义}
+项目横轴使用沿晶格轴的无限 Ising 自旋\emph{连通}关联长度约定：
+\begin{equation}
+ \beta^*=-\tfrac12\ln\tanh\beta,\qquad
+ \xb=\begin{cases}
+ [2(\beta^*-\beta)]^{-1},&\beta<\beta_c,\\
+ [4(\beta-\beta^*)]^{-1},&\beta>\beta_c.
+ \end{cases}\label{eq:xi}
+\end{equation}
+这与原图脚本及输入表一致。有序相必须扣除 $m^2$；cat 态中不衰减的长程序不能
+被当作一个有限连通关联长度。边界 MPS 的谱长度还取决于选取哪一个本征值、对称性
+通道及一步 transfer 的物理长度；六-$R$ 的 replica seam 自己也有谱隙。
+因此应分别记录 $\xb,\xi_{\rm bnd},\xi_{\rm seam}$，不能看到一个因子二就统一改名。
+
+\textbf{不过，常数因子二绝不能解释真正的对数斜率之差：}
+\begin{equation}
+ b\ln(2\xi)+B=b\ln\xi+(B+b\ln2).
+\end{equation}
+它只横向平移。若曲线本来有曲率，平移后选取了不同窗口，有效斜率可以变；那是
+选窗/交叉行为，不是对数系数变成两倍。
+同样，单凭 Kramers--Wannier duality 不能认定本 replica observable 自对偶；
+还需变换缺陷、边界与 sector。本文不将未经构造的“对偶 seam”当成已证等式。
+
+\section{“普适对数项”来自哪里？不是 marginal 算符的同义词}
+\subsection{最简单的说明：先有幂律振幅，再取对数}
+若扣除体积及线张力后的 ratio 满足
+\begin{equation}
+ Q(\ell)\sim A(\ell/a)^{-\Delta_Q},
+ \qquad \tS=-\ln Q=\Delta_Q\ln(\ell/a)-\ln A+o(1),\label{eq:log}
+\end{equation}
+就得到对数自由能。$\Delta_Q$ 是多个网络的有效缩放指数之差，可以有符号；
+它\textbf{不要求某个扰动算符的 RG 本征值为零}。
+例如普通临界两点函数 $\langle O(0)O(r)\rangle\sim r^{-2\Delta}$，取负对数后就是
+$2\Delta\ln r$，即使 $O$ 绝非 marginal。
+所以旧 note 中“有对数 $\Leftrightarrow$ marginal junction；斜率不同
+$\Rightarrow$ relevant junction”的推断不能成立。
+
+\subsection{角点、边界条件与 replica 数据}
+二维 CFT 中，角度为 $\theta$ 的角点在适用条件下有
+\begin{equation}
+ F_{\rm corner}=\left[\frac{c}{24}\left(\frac\theta\pi-\frac\pi\theta\right)
+ +\frac\pi\theta h_{\rm bcc}\right]\ln(\ell/a)+\cdots.\label{eq:corner}
+\end{equation}
+其中 $h_{\rm bcc}$ 是两侧边界条件变化算符的维数。该式及适用条件见
+Stéphan--Dubail 第 2.2 节，式 (11)--(12)\cite{SD}；它回顾 Cardy--Peschel 结果。
+这说明系数可以普适，却仍依赖角度、边界条件及缺陷数据。
+\textbf{不能直接把 $c=1/2$ 和某个角度代入就当作本项目 $b_J$：}
+必须先识别折叠/复制后的场论、每个 $Z_j$ 的边界条件及允许的 junction 通道。
+Fradkin--Moore 对某类共形 RK 态的双分区熵给出几何相关对数项\cite{FM}，
+是重要背景，但不是当前有限 Rényi 指标三方组合的现成公式。
+
+式~\eqref{eq:freeenergy} 若各项有对数系数 $b_j$，则
+\begin{equation}
+ b_{\tS}=b_4+2b_1-b_{2A}-b_{2B}-b_{2C}.\label{eq:bcomb}
+\end{equation}
+直 seam 的线张力逐臂抵消，\textbf{不自动意味着}式~\eqref{eq:bcomb} 为零，
+也不自动意味着所有 $c$ 相关项消失。线张力按长度计数，角点与 junction 的局部
+replica 连接不同，必须单独计算。旧 note 从前者直接推出后者，缺了一步证明。
+
+\subsection{什么时候两相和 MC 应当给出同一个系数？}
+若同时满足以下条件，预期相同 $b_J$ 是合理的：
+\begin{enumerate}
+\item 来自同一个体临界固定点，使用同一个 replica observable 和相同角度；
+\item junction/边界 RG 流达到同一个固定点，主导通道在两相均有非零振幅；
+\item 外边界、额外端点的对数项已匹配或证明抵消；
+\item $a\ll\xb\ll L,\xc$，或临界 MC 的对应渐近尺寸窗口已经达到。
+\end{enumerate}
+这时不同 massive phase 如何终止 RG 流主要可进入 $B_\pm$ 与修正项。
+如果这些前提破坏，比如缺陷流向不同边界固定点或 sector 投影改变主导通道，
+则可能出现不同的渐近系数；但\textbf{必须有缺陷/sector 的推导或独立证据}，
+不能仅凭现有三条局部拟合线宣布这一机制。
+其他 Rényi 类问题中确有边界相关扰动导致的相变\cite{SMP}；该文讨论的是
+Luttinger liquid 的 Rényi--Shannon 问题，只证明这种机制可能存在，
+不证明本项目 RK--Ising 在 $n=2$ 存在同样的相变。
+
+\section{有限 $\chi$：同一横轴可以超过实际可分辨的长度}
+有限-$\chi$ MPS 近临界可产生有限纠缠长度；在相应一维共形条件下常写
+$\xc\propto\chi^\kappa$\cite{Pollmann}。这里将 $\xc$ 用作截断的有效尺度，
+\textbf{不直接把该文的 $\kappa$ 公式套在所有 LMPS、replica seam 或有限-$D$ PEPS 上}。
+固定 $\chi$ 扫 $\beta$ 时，横轴仍可用精确公式一直增大的 $\xb$；
+但实际数值态未必继续解析这个增长。
+
+假设存在共同对数主项，一个有用的\emph{工作假设}是
+\begin{equation}
+ \tS_\pm(\beta,\chi)
+ =b_J\ln(\xb/a)+\Phi_\pm(\xb/\xc)
+ +\delta_\pm(\xb/a)+\epsilon_{\rm solver}.\label{eq:chi}
+\end{equation}
+$\Phi_\pm$ 编码截断交叉，$\delta_\pm$ 包括解析及无关场修正。
+真实算法可能还引入有效磁场或其它相关扰动，所以式~\eqref{eq:chi} 是待检验的简化，
+不是对 finite-$\chi$ 的严格单参数描述。
+局部斜率为
+\begin{equation}
+ \frac{d\tS}{d\ln\xb}
+ =b_J+\frac{d\Phi_\pm}{d\ln\xb}
+       +\frac{d\delta_\pm}{d\ln\xb}
+       +\frac{d\epsilon_{\rm solver}}{d\ln\xb}.
+\end{equation}
+它不是自动等于 $b_J$。
+
+一个仅用于说明的平滑 cutoff 模型是
+\begin{equation}
+ \xi_{\rm eff}=(\xb^{-p}+\xc^{-p})^{-1/p},\quad
+ \tS=b_J\ln(\xi_{\rm eff}/a)+B,\quad
+ \left.\frac{d\tS}{d\ln\xb}\right|_{\xc}
+ =\frac{b_J}{1+(\xb/\xc)^p},\qquad p>0.\label{eq:toy}
+\end{equation}
+即使真实 $b_J$ 相同，不同 cutoff 位置也会给出不同的表观斜率。
+这不是对数据的拟合；它本身不能解释所有非单调峰谷。必须再检验相别交叉、
+分支切换或数值误差，不能把一个 dip 都塞进这个 toy model。
+
+如果在临界点确有 $\tS=b_J\ln\xc+B$ 且 $\xc\propto\chi^\kappa$，那么
+\begin{equation}
+ \frac{d\tS}{d\ln\chi}=\kappa b_J,
+ \qquad \frac{d\tS}{d\ln\xc}=b_J.
+\end{equation}
+所以原始 $\ln\chi$ 斜率本来就不必等于 $\ln\xi$ 斜率。非临界固定波函数若最终
+收敛到有限相关长度，随着 $\chi$ 增大应趋于平台，而不是永远对数增长。
+
+\section{有限尺寸 MC 与无限网络：几何如何对应？}
+\subsection{同一个内部 junction，但远处不同}
+MC 代码使用\emph{开放} $L\times L$ 正方形，C 在上半区、A/B 在下方两个象限。
+它有一个内部三方 junction、三处 seam 与物理外边界的交点。
+将整个图反射后与无限网络的 AB 上、C 下约定一致；在 RK 的空间对称性下这不是
+新的物理量。关键差别是\textbf{物理外边界}对\textbf{无限远收缩条件}。
+
+\begin{figure}[htbp]\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\small]
+\begin{scope}
+\fill[blue!8] (0,2) rectangle (4,4);
+\fill[green!10] (0,0) rectangle (2,2);
+\fill[orange!12] (2,0) rectangle (4,2);
+\draw[thick] (0,0) rectangle (4,4);
+\draw[thick] (0,2)--(4,2);\draw[thick] (2,0)--(2,2);
+\node at (2,3){C};\node at (1,1){A};\node at (3,1){B};
+\fill[red!70!black] (2,2) circle(.08);
+\foreach \x/\y in {0/2,4/2,2/0}{\fill (\x,\y) circle(.06);}
+\node[anchor=south] at (2,4.2){MC：一个内部 junction};
+\node[align=center] at (2,-.65){三处 seam 外端点\quad 开放边界\\临界时各距离 $\propto L$};
+\end{scope}
+\begin{scope}[xshift=7cm]
+\fill[blue!8] (0,2) rectangle (4,4);
+\fill[green!10] (0,0) rectangle (2,2);
+\fill[orange!12] (2,0) rectangle (4,2);
+\draw[dashed,gray] (0,0) rectangle (4,4);
+\draw[thick,-{Stealth}] (2,2)--(-.2,2);
+\draw[thick,-{Stealth}] (2,2)--(4.2,2);
+\draw[thick,-{Stealth}] (2,2)--(2,-.2);
+\node at (2,3){C};\node at (1,1){A};\node at (3,1){B};
+\fill[red!70!black] (2,2) circle(.08);
+\draw[dashed,red!60] (2,2) circle(1.05);
+\node[anchor=south] at (2,4.2){无限网络：同一局部角度};
+\node[align=center] at (2,-.65){seam 延伸至无穷远\\质量/截断限制可解析的尺度};
+\end{scope}
+\end{tikzpicture}
+\caption{几何示意，不是新的计算结果。无限网络中的红虚圈只示意有效长度尺度，
+不是一条新物理边界。不能默认 MC 外端点贡献存在，也不能默认其抵消；要对 ratio
+中的各网络逐项检查。两图都只有一个内部三方 junction，不能凭直觉用 junction
+数目差解释当前斜率比。}
+\end{figure}
+
+孤立 seam 远离 junction 后的局部 replica 因子化，可以使两套网络的线张力相消；
+同样的局部因子化也\emph{可能}使某些外端点贡献相消。但不能从线张力相消直接推出
+所有对数项和全局缺陷连接都相消。若外边界项没有全部抵消，可以示意写成
+\begin{equation}
+ b_{\rm MC}=b_J+\Delta b_{\rm outer},
+\end{equation}
+其中 $\Delta b_{\rm outer}$ 是待计算的净贡献，\textbf{本文没有证据证明它非零}。
+必须检查整个 ratio 的 replica wiring，而非只数原格点图上的三个黑点。
+
+\subsection{正确的 finite-size scaling 假设含有加性对数}
+假设 MC 与无限网络的 junction 项已匹配，可尝试
+\begin{equation}
+ \tS(t,L)=b_J\ln(L/a)+\mathcal F_\pm(L/\xb)
+                 +\text{corrections}.\label{eq:fss}
+\end{equation}
+在 $t=0$、$L/\xb=0$ 时得到临界 $\ln L$；若 massive 热力学极限应为
+$b_J\ln(\xb/a)+B_\pm$，则需
+\begin{equation}
+ \mathcal F_\pm(x)\sim-b_J\ln x+B_\pm,\qquad x\gg1.
+\end{equation}
+因此纯粹画 $\tS$ 对 $L/\xi$ 而不减去对数项，collapse 失败\textbf{不反驳}
+对数标度；它可能只是检验了错误的 ansatz。
+另一方面，任意减一条实测临界曲线会人为提高重合度，也不能反过来证明唯一的
+普适标度函数。应使用预先声明的模型、固定窗口和未参与拟合的数据检验。
+
+\section{sector、cat 与 broken：能解释什么，不能解释什么？}
+RK 有序相的有限零场 MC 保留整体 $\mathbb Z_2$ 对称性；无限边界求解可能选择
+broken branch，也可能保留 cat 型结构。必须统一真空和归一化约定。
+一个完全解耦的、固定概率的全局 sector 标签通常带来与尺度无关的常数；
+\textbf{不能把它自动当成改变对数斜率的原因}。
+若 sector 权重随 $L,\beta,\chi$ 变化、replica 缺陷选择不同通道，或者求解过程换支，
+它才会污染局部斜率。需要保存磁矩、对称性标签、固定点重叠和分支连续性来区分。
+
+本次 bare 检验在先前五个通过检查的保存 boundary 上复现了旧 map 结果，
+$\tS$ 最大差异约 $1.32\times10^{-6}$，包括旧 dip。这缩小了“endpoint 替代单独造成
+该 dip”的嫌疑范围，但两种路径共享 boundary 和部分 six-$R$ 代码，
+\textbf{不是}物理 sector、MC 标度或全部收缩正确性的独立证明。
+另两个点未通过远端对齐检查，不应加入有效拟合。
+新补的 12 点仍是同一 $\chi=16$、同一保存分支的 bare 检验，主要检验方法一致性，
+不能单独解决无限-$\chi$ 的临界系数问题。
+
+\section{怎样区分共同对数、真实相别差异与非对数？}
+\subsection{先做最有判别力的检查，不先选一个漂亮的指数}
+\begin{enumerate}
+\item \textbf{定义与有限网络对照。}用同一几何、同一 replica ratio、同一远端条件，
+先在有限尺寸比较 MC、直接张量收缩及六-$R$ 的有限长度版本；检查外端点是否相消。
+全 $A_L$ 的 uniform 表示本身不缺中心矩阵，不再以“没有显式 $C$”作为错误证据。
+\item \textbf{先在固定 $\beta$ 收敛 $\chi$。}检查 $\tS$ 及每个分量、
+物理/边界/replica 长度、磁矩与 far-cap 归一化。自由能收敛通常比 junction 量容易，
+不能代替这一步。分别保留 broken、对称分支，不跨分支求导。
+\item \textbf{再靠近临界点。}以已收敛的点形成滑动局部斜率，逐步增加最小拟合
+长度；寻找在窗口移动、$\chi$ 增大、方法改变下都稳定的平台，而非寻找最陡三点。
+\item \textbf{MC 做固定窗口及系统误差检查。}不同 $L_{\min}$、GL 阶数、独立链、
+正反积分和成分重构应相容。对选窗做 bootstrap 时，每次必须重新执行完整选窗规则；
+只对选定三点传播误差不能反映极值选择偏差。
+\item \textbf{几何对照。}保持内部三方角度不变，改变开放边界距离或 aspect ratio，
+检验候选对数系数是否不变；若变化，先定位端点项和形状修正。
+\end{enumerate}
+这些是后续计划，本文没有提交新的 MC 或新的大-$\chi$ boundary 优化。
+
+\subsection{需要比较的候选形式}
+在相同可信窗口，可比较
+\begin{align}
+\mathrm{H}_{\log}:\quad & B_\pm+b\ln x+d_\pm x^{-\omega},\\
+\mathrm{H}_{\mathrm{sep}}:\quad & B_\pm+b_\pm\ln x+d_\pm x^{-\omega},\\
+\mathrm{H}_{\mathrm{pow}}:\quad & B_\pm+A_\pm(x^p-1)/p.
+\end{align}
+$x$ 为无量纲长度；第三式在 $p\to0$ 时连续趋于对数。
+短窗口中一个接近零的幂指数很难与对数区分，三个自由参数的幂律拟合比两个参数
+的纯对数 RMS 更小，也不能直接宣称幂律成立。应报告参数相关性、窗口稳定性、
+含修正的共同斜率拟合与留出数据表现。不能把过多修正参数塞进三点窗口。
+
+特别是若旧 note 把 seam 积分剖面拟合成 $r^{-x}$，得到
+$\int^L dr\,r^{-x}\sim L^{1-x}$，这只是\emph{该插值路径的剖面模型}。
+热力学积分沿臂的分解会受 replica relabeling/插值路径影响；未证明该剖面对应
+规范无关的临界算符前，$x$ 不能直接命名为本 junction 的普适维数。
+
+\section{结论：现在应怎样解释这张图？}
+\note{当前最有证据的解释是：\textbf{三个斜率是不同控制参数与不同 cutoff 下的
+交叉区间有效斜率，不是已经测出的三个普适常数。}两相的有限尺度差异确实存在，
+有限 $\chi$ 又明显改变其中一些区间；MC 的最陡三点也不能代表完整大-$L$ 极限。
+因此暂时既不能宣布“所有结果只由 $\xi$ 决定”，也不能宣布“普适对数项被排除”。}
+
+\begin{center}\small
+\begin{tabular}{p{.42\linewidth}p{.46\linewidth}}
+\toprule
+可以说 & 还不能说\\
+\midrule
+图上局部斜率不同，窗口与 $\chi$ 有影响 & 两相存在三个已确定的普适系数\\
+相近、较稳定窗口仍有两相差异 & 所有差异都只是 finite-$\chi$ 假象\\
+phase/缺陷/sector 是 $\xi$ 之外的信息 & Kramers--Wannier 保证此 observable 自对偶\\
+对数自由能可来自幂律 partition ratio & 对数必然来自 marginal junction\\
+直 seam 的线张力抵消 & 所有 corner/central-charge 对数必然抵消\\
+bare 复现同一 boundary 上的旧 dip & dip 已被证明是物理奇异性\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\appendix
+\section{可复现文件与证据边界}
+本 note 是独立解释补充，不覆盖主方法 note，也不覆盖旧图。分析程序：
+\begin{quote}\small
+\path{code2d/lmps/vumps/production/audit_rk_scaling_slopes.py}
+\end{quote}
+Slurm 分析任务为 \texttt{11317163}，最终复核版本为 \texttt{11317175}；
+后者严格复现原图围绕加权均值计算的 MC 链间散布误差。
+所有拟合和绘图在计算节点执行，没有新抽样。
+产物统一放在
+\begin{quote}\small\path{results/RK_Ising/scaling_interpretation/}\end{quote}
+其中 \texttt{highlighted\_points.csv} 给出原图三段全部原始点，
+\texttt{fit\_summary.csv} 给出不同规则/窗口的斜率与残差，
+\texttt{fit\_windows.csv} 保留所有连续窗口，
+\texttt{mc\_pooled.csv}、\texttt{tn\_inputs.csv} 是本次实际读取的数据快照，
+\texttt{input\_hashes.csv} 记录来源哈希。
+旧图数据可能来自历史 map 路径；其“与 bare 相同”的结论只能限于已逐点验证的部分。
+
+复核依据包括：主 \texttt{methods.tex} 的 observable 定义、
+\path{code2d/mc/mc_tildeS.jl} 的开放几何与 replica 耦合、旧绘图脚本及其读取的表。
+档案 \path{notes/archive/20260909_methods_consolidation/note_seam_phase_en/main.tex}
+关于“排除 logarithm/marginal”的较强结论不在本文沿用；旧 MC note 对某些有序相
+campaign 的成分恒等式失败有明确警告，这不能直接归因到当前临界数据，但说明
+MC 点的名义误差不应被当成所有系统误差的总和。
+
+\section{文献到底支持什么？}
+\begin{itemize}
+\item 文献\cite{SD} 支持二维角点自由能对数项、边界条件变化算符及某些有限尺寸修正。
+本文未把它当成本项目 $b_J$ 的已完成推导。
+\item 文献\cite{FM} 支持某类二维共形 RK 波函数双分区纠缠的几何对数项。
+它没有给出本文六-$R$ 组合的具体系数。
+\item 文献\cite{Pollmann} 支持有限纠缠引入有效关联长度和有限纠缠标度。
+它不保证本项目所有 transfer channel 共用一个 $\xi$。
+\item 文献\cite{SMP} 给出另一个 Rényi 类问题中真实的边界相变例子。
+它不是 RK--Ising 三方 $n=2$ 缺陷相变的证明。
+\end{itemize}
+\begin{thebibliography}{9}
+\bibitem{SD} J.-M. Stéphan and J. Dubail,
+\emph{Logarithmic corrections to the free energy from sharp corners with angle $2\pi$},
+J. Stat. Mech. (2013) P09002.
+\href{https://arxiv.org/abs/1303.3633}{arXiv:1303.3633}.
+尤其第 2.2 节及式 (11)--(12)；原始角点结果为 J. Cardy and I. Peschel,
+Nucl. Phys. B 300, 377 (1988),
+\href{https://doi.org/10.1016/0550-3213(88)90604-9}{doi:10.1016/0550-3213(88)90604-9}.
+\bibitem{FM} E. Fradkin and J. E. Moore,
+\emph{Entanglement entropy of 2D conformal quantum critical points: hearing the shape of a quantum drum},
+Phys. Rev. Lett. 97, 050404 (2006).
+\href{https://arxiv.org/abs/cond-mat/0605683}{arXiv:cond-mat/0605683}.
+\bibitem{Pollmann} F. Pollmann, S. Mukerjee, A. Turner and J. E. Moore,
+\emph{Theory of finite-entanglement scaling at one-dimensional quantum critical points},
+Phys. Rev. Lett. 102, 255701 (2009).
+\href{https://arxiv.org/abs/0812.2903}{arXiv:0812.2903}.
+\bibitem{SMP} J.-M. Stéphan, G. Misguich and V. Pasquier,
+\emph{Phase transition in the Rényi--Shannon entropy of Luttinger liquids},
+Phys. Rev. B 84, 195128 (2011).
+\href{https://arxiv.org/abs/1104.2544}{arXiv:1104.2544}.
+\end{thebibliography}
+\end{document}

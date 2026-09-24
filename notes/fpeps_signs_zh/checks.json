@@ -1,0 +1,98 @@
+{
+  "scope": "local CAR algebra and occupation/Gaussian conventions only; no six-R validation",
+  "local_tensor": {
+    "matrix_error": 0.0,
+    "nonzero_entries": 16,
+    "table": [
+      {
+        "kdrul": "00000",
+        "coefficient": "(1+0j)"
+      },
+      {
+        "kdrul": "11000",
+        "coefficient": "1j"
+      },
+      {
+        "kdrul": "10100",
+        "coefficient": "(-1+0j)"
+      },
+      {
+        "kdrul": "10010",
+        "coefficient": "(-1+0j)"
+      },
+      {
+        "kdrul": "10001",
+        "coefficient": "-1j"
+      },
+      {
+        "kdrul": "01100",
+        "coefficient": "-1j"
+      },
+      {
+        "kdrul": "01010",
+        "coefficient": "(-1+0j)"
+      },
+      {
+        "kdrul": "01001",
+        "coefficient": "(1+0j)"
+      },
+      {
+        "kdrul": "00110",
+        "coefficient": "(-1+0j)"
+      },
+      {
+        "kdrul": "00101",
+        "coefficient": "(-1+0j)"
+      },
+      {
+        "kdrul": "00011",
+        "coefficient": "1j"
+      },
+      {
+        "kdrul": "11110",
+        "coefficient": "(-1+0j)"
+      },
+      {
+        "kdrul": "11101",
+        "coefficient": "-1j"
+      },
+      {
+        "kdrul": "11011",
+        "coefficient": "1j"
+      },
+      {
+        "kdrul": "10111",
+        "coefficient": "(-1+0j)"
+      },
+      {
+        "kdrul": "01111",
+        "coefficient": "(-1+0j)"
+      }
+    ]
+  },
+  "permutations": {
+    "permutation_parity_cases": 384,
+    "even_object_negative_crossing": true,
+    "occupied_region_ordinary_swap": 1,
+    "occupied_region_fswap": -1
+  },
+  "gaussian_oracle": {
+    "covariance_reordering_error": 1.1102230246251565e-16,
+    "grouped_cube_error": 5.551135976516221e-16,
+    "raw_interleaved_cube": [
+      0.0884727785106113,
+      -5.07626324874693e-19
+    ],
+    "grouped_cube": [
+      0.11256933459929705,
+      -1.5215767378878779e-18
+    ],
+    "ordering_difference": 0.024096556088685744,
+    "replica_conjugator_destinations_1based": [
+      1,
+      3,
+      4,
+      2
+    ]
+  }
+}

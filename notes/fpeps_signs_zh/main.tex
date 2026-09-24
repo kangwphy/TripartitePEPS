@@ -1,0 +1,1072 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=23mm]{geometry}
+\usepackage{fontspec,xeCJK}
+\setmainfont{DejaVu Serif}
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+\setCJKmainfont[AutoFakeBold=2,AutoFakeSlant=0.15]{Droid Sans Fallback}
+\setCJKmonofont{Droid Sans Fallback}
+\xeCJKDeclareCharClass{Default}{"201C,"201D}
+\setlength{\emergencystretch}{2em}
+\usepackage{amsmath,amssymb,bm,booktabs,longtable,array}
+\usepackage{xcolor,graphicx,tikz}
+\usetikzlibrary{arrows.meta,positioning,decorations.pathreplacing}
+\usepackage[colorlinks=true,linkcolor=blue!55!black,urlcolor=blue!55!black]{hyperref}
+\renewcommand{\contentsname}{目录}
+\renewcommand{\abstractname}{摘要}
+\renewcommand{\refname}{参考资料与代码依据}
+\newcommand{\Tr}{\operatorname{Tr}}
+\newcommand{\str}{\operatorname{str}}
+\newcommand{\Pf}{\operatorname{Pf}}
+\newcommand{\id}{\mathrm{id}}
+\newcommand{\tS}{\widetilde S}
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\status}[1]{\par\smallskip\noindent\textbf{状态：#1。}\ }
+\newcommand{\eps}{\varepsilon}
+\title{严格 $D=2$ fermionic PEPS 与三分 Rényi 多副本环境\\
+\large 局域张量、交换符号、six-$R$ 接缝及验证方案}
+\author{研究设计 note}
+\date{2026 年 9 月 9 日初稿；9 月 18 日更新双边求解与 bare/direct 数据}
+\begin{document}
+\maketitle
+\begin{abstract}
+目标是把手写 \code{fPEPS\_renyi\_2.pdf} 中的严格 Gaussian fPEPS 接到目前的
+boundary VUMPS、LMPS 与 six-$R$ 计算上，并与 Gaussian 目录的三分多重熵比较。
+本文给出局域 $D=2$ 张量的全部非零系数，固定占据数与 leg 顺序，区分
+费米子重排的 graded swap 和观测量定义中的普通 replica permutation，
+说明单副本双层吸收的符号为何不能直接替代多副本接缝的符号。
+建议先建立有限网络的显式 swap 基准，再验证带符号的两周期分解，最后接入 six-$R$。
+特别保留中心闭合、远端 cap、spin structure 和截断后 parity string 的信息。
+
+局域 CAR 展开、384 个置换/奇偶组合，以及四模 Gaussian 占据数基准已做小规模数值核对；
+后续已实现带完整宇称求和的 LMPS/six-$R$ 收缩，并完成有限网络独立符号检查。
+2026 年 9 月 17 日将主路线纠正为两列／三列固定点的 bare/direct，
+$w=1,\chi=4$ 的固定网络长度和相位检查通过，但重构一致性与物理精度尚未认证。
+本文保留设计阶段的推导与验证要求，新增实现状态不构成无限 $\chi$ 正确性证明。
+\end{abstract}
+\tableofcontents
+\newpage
+
+\section{结论和研究对象}
+
+\textbf{严格的 fPEPS 可以直接构造；主要难点在 environment 的符号约定和多副本闭合。}
+这里的符号是反对易代数的确定性符号，不是要用 Monte Carlo 平均消除的随机权重问题。
+应把它做成可验证的张量操作规则，而不是在最终标量上补一个经验负号。
+
+建议采用以下顺序：
+\begin{enumerate}
+\item 固定 $Q$、有向虚键和物理 Fock 顺序，生成精确局域 $A$。
+\item 在有限小网络上，从原始 ket/bra 和显式 swap 门计算
+      $Z_1,Z_{2A},Z_{2B},Z_{2C},Z_4$，与占据数和 Gaussian 方法逐项比较。
+\item 从同一套线序规则导出单副本双层、seam transfer、远端 cap 和中心闭合；
+      所有截断保留 parity 与有向融合信息。
+\item 验证四副本接缝能否在明确的带符号基变换下分成两个两周期。
+      通过后才复用 six-$R$；否则先用完整四副本接缝或扩展 parity 通道。
+\end{enumerate}
+
+这里“严格”指局域张量以有限 $D$ 精确表示指定状态。
+\textbf{有限 $\chi$ 的 VUMPS/LMPS 环境仍是近似。}
+RK--Ising 是严格 $D=2$ 态；当前 TFIM 路线是 AD/CTMRG 优化有限 $D$ 张量，
+再对已保存的态求 VUMPS 环境。fPEPS 的新计算应像 RK benchmark 一样固定 $A$，
+把 $D$ 误差与 $\chi$ 误差分开，不能将 TFIM 的优化收敛逻辑直接照搬。
+
+已有资料中的 \code{note\_fpeps\_en} 实际讨论的是 \emph{finite} RK--Ising PEPS，
+不是 fermionic PEPS。本文主要依据当前 \code{notes/methods.tex}，
+不把 archive 中的历史推导当作已验证结论。
+
+\section{先固定观测量：Fock 分区、普通置换和 Gaussian 对照}
+\subsection{本 note 的目标定义}
+
+对一个有限系统，先选择区域内部的固定顺序，再把全部物理模排列为
+\begin{equation}
+ \mathcal O_{ABC}=(A_1,\ldots,A_{N_A},B_1,\ldots,B_{N_B},C_1,\ldots,C_{N_C}).
+ \label{eq:regionorder}
+\end{equation}
+按此顺序定义 Fock 基和系数张量 $\psi_{abc}$，并在
+$\mathcal H_A\otimes\mathcal H_B\otimes\mathcal H_C$ 的普通系数空间中定义 replica contraction。
+这是要和 Gaussian 程序比较的约定；不是任意二维 Jordan--Wigner 顺序下裸 occupation reshape 的约定。
+对未归一化 $\rho=|\psi\rangle\langle\psi|$，定义
+\begin{align}
+ Z_1&=\langle\psi|\psi\rangle,\qquad
+ Z_{2X}=\Tr\big[\rho^{\otimes2}P_X^{\rm occ}(12)\big],\\
+ Z_4&=\Tr\big[\rho^{\otimes4}
+ P_A^{\rm occ}(\sigma_A)P_B^{\rm occ}(\sigma_B)P_C^{\rm occ}(\sigma_C)\big],\label{eq:zdef}\\
+ \sigma_A&=\id,\qquad \sigma_B=(12)(34),\qquad \sigma_C=(13)(24).
+ \label{eq:sig}
+\end{align}
+$P^{\rm occ}$ 在所指定的区域系数基中只置换指标，不额外乘费米子交换号。
+写成逐项相乘的形式就是
+\begin{equation}
+ Z_4=\sum_{\{n_i^{(r)}\}}\prod_{r=1}^4
+ \psi(n^{(r)})\,
+ \psi^*\!\left(\{n_i^{(\sigma_{X(i)}^{-1}(r))}\}_i\right).
+ \label{eq:occupation}
+\end{equation}
+此处三种置换都是 involution，故逆可省；推广时必须保留源/目标约定。
+目标比值为
+\begin{equation}
+ S_2(X)=-\ln\frac{Z_{2X}}{Z_1^2},\quad
+ S_2^{(3)}=-\frac12\ln\frac{Z_4}{Z_1^4},\quad
+ \boxed{\tS=-\ln\frac{Z_4Z_1^2}{Z_{2A}Z_{2B}Z_{2C}}.}
+ \label{eq:ratio}
+\end{equation}
+$Z_4$ 含四个 ket 和四个 bra，合计八层；它不是六个物理副本。
+six-$R$ 的“六”是六个两周期 seam endpoint。
+
+\subsection{改变物理顺序时必须改变系数}
+
+若源模 $i$ 被移动到目标位置 $\tau(i)$，占据数组 $\mathbf n$ 的 Fock 重排号为
+\begin{equation}
+ \eps(\tau,\mathbf n)=(-1)^{\sum_{i<j,\,\tau(i)>\tau(j)}n_i n_j}.
+ \label{eq:koszul}
+\end{equation}
+将 row-major 蛇形/扫描顺序换成式\eqref{eq:regionorder}时，
+不仅要重新索引位串，还要乘这个号。协方差矩阵则只需同时重排对应的两个 Majorana 行列：
+$\Gamma'=P\Gamma P^T$；在协方差表示中，这已经是费米模重排，不能再额外给矩阵元乘 occupation sign。
+在多体向量中只做无符号 reshape，则是不同的 Hilbert 空间分解，不能指望得到同一个三分量。
+
+Gaussian 的 \code{run\_point.py} 中 \code{evaluate} 已按 $A,B,C$ 排列物理模；
+\code{maj\_tools.py} 的 \code{cube\_occupation} 是普通占据数拼接的有限系统 oracle。
+本次四模随机 BdG 检查把原顺序 $A,B,A,C$ 改为 $A,A,B,C$：
+未重排的裸 cube 为 $0.0884727785106113$，正确重排后为 $0.1125693345992971$。
+后者与 Gaussian 公式的差为 $5.6\times10^{-16}$。
+这个差不是数值误差，而是演示“相同的 region 标签不足以固定 occupation 张量的定义”。
+
+\subsection{Gaussian glue 与 PEPS permutation 的字典}
+
+Gaussian occupation oracle 实际使用
+\begin{equation}
+ (\sigma_A^{G},\sigma_B^{G},\sigma_C^{G})
+ =((13)(24),(12)(34),(14)(23)).
+\end{equation}
+它与式\eqref{eq:sig}对\emph{纯态}等价：先同时左乘 $(13)(24)$ 重标 bra 副本，
+再用 $r=(234)$ 同时共轭，得到 $(\id,(12)(34),(13)(24))$。
+此处利用 ket 与 bra 各自是四个相同波函数因子的事实，不应不加论证地推广到任意混态。
+
+此外 \code{cube\_bdg\_validate.py} 和 \code{bigcube.py} 的有向 Gaussian glue 为
+\begin{align}
+ g_A&=E_{13}-E_{31}+E_{24}-E_{42},\nonumber\\
+ g_B&=E_{12}-E_{21}-E_{34}+E_{43},\nonumber\\
+ g_C&=E_{14}-E_{41}-E_{23}+E_{32}.\label{eq:gmat}
+\end{align}
+它们满足 $g_X^2=-I$、$\{g_X,g_Y\}=0$（$X\ne Y$）和 $g_Ag_B=-g_C$。
+\textbf{这些是 Gaussian/Grassmann 表示中的有向粘合矩阵，不是 occupation 置换矩阵。}
+Gaussian note 把它们称为 involution 不准确；不能用
+“$\sigma_A\sigma_B\sigma_C=e$”替代有向符号的推导，因为在式\eqref{eq:sig}的 gauge 中该乘积不等于 $e$。
+这里的建议是以实际 glue、占据数 oracle 和显式 gauge 字典为准。
+
+在现有 Majorana 约定下，参考计算使用
+\begin{equation}
+ \Lambda=I_4\otimes i\Gamma+\sum_X g_X\otimes P_X^{\rm Maj},\qquad
+ |\gamma_{\rm cube}|=2^{-2N}\sqrt{|\det\Lambda|}.
+ \label{eq:pf}
+\end{equation}
+其中 $P_X^{\rm Maj}$ 选出区域的两个 Majorana 分量。
+这给出了独立的幅值检查；$\Pf(\Lambda)$ 的有向相位还取决于 Grassmann 积分顺序。
+\textbf{由 determinant 开平方本身不能确定 Pfaffian 的符号。}
+小系统应对比完整复数 occupation 标量；大系统用 product-state 基准、Pfaffian 约定及不跨零的连续路径固定相位，
+不能仅因为 $\det\Lambda$ 为正就断言符号正确。
+
+\section{精确局域张量：由 Q 生成，避免手填符号}
+\subsection{投影算符与虚键}
+
+手写 note 第 1 页与 KSVC 原文\cite{ksvc}的 Gaussian projector 一致：
+\begin{align}
+ Q&=e^F,\nonumber\\
+ F&=(i\alpha+\beta)(-\gamma+i\delta)+\alpha\beta+\gamma\delta
+       +c^\dagger(-i\alpha-\beta-\gamma+i\delta).\label{eq:q}
+\end{align}
+$\alpha,\beta,\gamma,\delta$ 分别为左、右、上、下虚费米子的 annihilator。
+取有向虚键
+\begin{equation}
+ \omega_x=1+\beta_r^\dagger\alpha_{r+\hat x}^\dagger,\qquad
+ \omega_y=1+\delta_r^\dagger\gamma_{r+\hat y}^\dagger.\label{eq:bond}
+\end{equation}
+每条腿只有一个虚复费米模，故 $D=2$，其奇偶分解为 $V=\mathbb C^{1|1}$。
+归一化版本把每个 $\omega$ 除以 $\sqrt2$，这一整体尺度应记入 $Z_1$，不影响同步归一化的式\eqref{eq:ratio}。
+
+按手写 note 固定\emph{算符单项式顺序}
+\begin{equation}
+ Q=\sum_{k,d,r,u,l} A^k_{drul}
+ (c^\dagger)^k\delta^d\beta^r\gamma^u\alpha^l.
+ \label{eq:acoeff}
+\end{equation}
+因此 raw storage 若采用现有 core 的 $[s,u,l,d,r]$，应赋值
+$A_{\rm raw}[k,u,l,d,r]=A^k_{drul}$。
+这句话仅指定\emph{坐标存储}；若实际改变 fermionic tensor 的 leg 顺序，仍须用式\eqref{eq:koszul}。
+原文 Eq.~(4) 的单项式是 $c^\dagger\alpha\beta\gamma\delta$，其系数不能无符号抄进式\eqref{eq:acoeff}。
+
+\subsection{全部系数和可复现生成法}
+
+五个互相反对易的 nilpotent 生成元为
+$\theta=(c^\dagger,\delta,\beta,\gamma,\alpha)$。
+$F$ 是二次式且 $F^3=0$，因此只需精确计算
+\begin{equation}
+ Q=1+F+\tfrac12F^2.
+\end{equation}
+单项式乘法先检查重复生成元（有则为零），再按排序逆序数给出符号。
+得到以下 16 个非零元，其余 16 个严格为零：
+\begin{center}
+\begin{tabular}{cc@{\qquad\qquad}cc}
+\toprule
+$(k,d,r,u,l)$ & $A^k_{drul}$ & $(k,d,r,u,l)$ & $A^k_{drul}$\\\midrule
+00000 & $1$ & 00110 & $-1$\\
+11000 & $i$ & 00101 & $-1$\\
+10100 & $-1$ & 00011 & $i$\\
+10010 & $-1$ & 11110 & $-1$\\
+10001 & $-i$ & 11101 & $-i$\\
+01100 & $-i$ & 11011 & $i$\\
+01010 & $-1$ & 10111 & $-1$\\
+01001 & $1$ & 01111 & $-1$\\\bottomrule
+\end{tabular}
+\end{center}
+所有项满足
+\begin{equation}
+ k+d+r+u+l=0\pmod2.\label{eq:even}
+\end{equation}
+这是 even tensor；不是说每条腿都只能取 even sector。
+伴随脚本以独立的 $32\times32$ Jordan--Wigner 算符矩阵重新计算 $e^F$，
+与上表重构矩阵的最大误差为零。
+这验证了\emph{局域算符展开}，尚未验证某个二维 contraction 图是否正确。
+
+若把式\eqref{eq:acoeff}变成从虚 Fock ket 到物理 ket 的矩阵，需要再指定虚 ket 的 creation 顺序。
+例如 annihilator 单项式 $\delta\beta\gamma\alpha$ 的自然配对 ket 是
+$\alpha^\dagger\gamma^\dagger\beta^\dagger\delta^\dagger|0\rangle$。
+改用另一顺序必须转换；不能把多项式系数、线图张量、线性映射矩阵三个对象默认为同一个数组。
+
+\subsection{严格 GS 的核对与有限系统边界}
+
+本 projector 对应手写页上的有限程配对与对角 hopping Hamiltonian。
+与 Gaussian 的 \code{cirac2\_model.py} 比较时，要固定 Fourier 指数、BdG 的
+$\tfrac12$、pairing 项与 h.c. 的计数，以及能量整体倍数；最可靠的状态检查是协方差，
+而不是只看色散的形状。对于代码记录的规范
+\begin{equation}
+ d_z=-2\cos k_x\cos k_y,\qquad d_x=2(\sin k_y-\sin k_x),
+\end{equation}
+在 $(\pi/2,\pi/2)$ 附近有
+$d_z=-2q_xq_y+O(q^4)$、$d_x=q_x^2-q_y^2+O(q^4)$，
+故 $E=q_x^2+q_y^2+O(q^4)$，这是 quadratic band touching。
+不能仅依据原文中的 Dirac 一词来选择线性节点的外推公式。
+
+\textbf{有限 open patch 的简单虚真空封边，不自动等于“删掉越界项”的 open Hamiltonian 的 GS。}
+虚边界选定一个 Gaussian 态；开放 Hamiltonian 可能有零模与边缘简并。
+小 patch 应首先比较同一个虚边界投影所得的 covariance，
+再检查 parent Hamiltonian 的 annihilation/eigenstate 条件。
+若要与某个特定 GS 比较，必须使边界条件、零模占据与 parity sector 一致。
+
+在环面上还要指定 $x,y$ 两个 spin structure。
+原文 Appendix A 明确指出：特定尺寸/闭合会使原始 fPEPS 投影的范数为零，
+其中有未耦合到物理模的虚 Majorana 环造成的可消除零点。
+因此不能把有奇异分母的 Schur complement 直接做 pseudoinverse 就宣称得到了原始非零 PEPS。
+可先选无零模的 APBC momentum grid，并在虚闭合处实现同一 twist，
+同时显式核对 $Z_1\ne0$；必要时按原文修改 unused-Majorana 的闭合。
+物理 APBC 与某一虚 parity 插入是否完全对应，需要由该 $Q$ 的投影验证。
+
+\section{符号规则：什么是 swap，什么不是}
+\subsection{三种操作必须区分}
+
+设基态 $|i\rangle$ 的奇偶为 $p_i\in\{0,1\}$。
+费米子线的相邻交换为
+\begin{equation}
+ F_{\rm swap}|i,j\rangle=(-1)^{p_ip_j}|j,i\rangle.
+ \label{eq:fswap}
+\end{equation}
+普通系数置换为 $P_{\rm swap}^{\rm occ}|i,j\rangle=|j,i\rangle$。
+二者关系为
+\begin{equation}
+ P_{\rm swap}^{\rm occ}=F_{\rm swap}D,\qquad
+ D|i,j\rangle=(-1)^{p_ip_j}|i,j\rangle.
+ \label{eq:correction}
+\end{equation}
+第三种是\emph{内存轴换位}：若只是将同一抽象 leg 放到另一个数组位置，
+可用普通数组 permutation，但抽象 tensor 的有序端口描述不能改变。
+如果程序借此真正重排端口或物理模，则必须实现式\eqref{eq:fswap}。
+接口应该显式区分这两种用途，而不是一律把所有 \code{permutedims} 乘号或一律不乘号。
+
+最简单的反例是区域约化态 $\rho_X=|1\rangle\langle1|$：
+\begin{equation}
+ \Tr[(\rho_X\otimes\rho_X)P^{\rm occ}_{\rm swap}]=1,
+ \qquad \Tr[(\rho_X\otimes\rho_X)F_{\rm swap}]=-1.
+\end{equation}
+可取整体偶宇称积态 $|1_A1_B0_C\rangle$，所以问题并不能靠“总态 even”回避。
+更一般地，$\rho_X=\operatorname{diag}(a,b)$ 时两者分别为 $a^2+b^2$ 和 $a^2-b^2$。
+若在 Rényi sewing 处盲目用 FSWAP，甚至会把纯态的 purity 变成负数。
+
+\subsection{任意 replica permutation 与非相邻交换}
+
+对按顺序排列的 $k$ 个\emph{区域副本块}，源块 $i$ 去目标位置 $\sigma(i)$，
+令块 parity 为 $P_i=N_i\bmod2$，则
+\begin{equation}
+ U^F_\sigma|\mathbf n_1,\ldots,\mathbf n_k\rangle
+ =\eps(\sigma,\mathbf P)|\mathbf n_{\sigma^{-1}(1)},\ldots,
+                  \mathbf n_{\sigma^{-1}(k)}\rangle,
+ \quad P^{\rm occ}_\sigma=U^F_\sigma D_\sigma.\label{eq:perm}
+\end{equation}
+$D_\sigma$ 的对角元就是式\eqref{eq:koszul}中的 $\eps$。
+若只移动一个区域在 replica-major 的全系统 Fock 空间中的模，
+必须对\emph{全部被跨越的模}使用逆序公式；不能忽略其他区域的 spectator parity。
+把各区域副本先排成相邻块后，才可以直接使用式\eqref{eq:perm}的块版本。
+
+在块顺序 $(1,2,3,4)$ 下，三种非平凡 Klein permutation 的 exponent 为
+\begin{align}
+ f_{(12)(34)}&=P_1P_2+P_3P_4,\nonumber\\
+ f_{(13)(24)}&=(P_1+P_2)(P_3+P_4),\nonumber\\
+ f_{(14)(23)}&=\sum_{i<j}P_iP_j \pmod2.\label{eq:klein}
+\end{align}
+因此非相邻 $(13)$ 不能只插 $(-1)^{P_1P_3}$；它还跨过块 2。
+这些式子也是解释为何不同 cycle 之间可能残留 parity 耦合的最直接例子。
+本次已遍历 $4!\times2^4=384$ 种情况，以相邻交换序列核对逆序公式。
+
+\textbf{区域 SWAP 是整个区域块的 SWAP。}
+若区域有多个物理模，不能在固定 replica-major 全局 Fock 顺序下，
+把它无条件替换成逐站点 FSWAP 再仅乘站点 $(-1)^{n_i^{(1)}n_i^{(2)}}$；
+从 replica-major 到 site-major 的基变换也有符号。
+实现上可以在区域系数基中用普通 delta sewing，
+让每个波函数先完成式\eqref{eq:regionorder}的重排；也可以在统一 graded 表示中编译完整的 $P^{\rm occ}$。
+两条路线应得到同一个完整标量，但不能把两条路线各自的修正同时插入。
+
+\subsection{bra、fusion、trace 与空间旋转}
+
+\begin{itemize}
+\item $\psi^\dagger$ 是整个 ket 网络的镜像/反序伴随，
+      $(O_1\cdots O_m)^\dagger=O_m^\dagger\cdots O_1^\dagger$。
+      可在特定吸收约定后存为 $A^*$，但不能先假定 \code{conj(A)} 自动完成了端口反序。
+\item 融合 $v=(i,j)$ 的 parity 为 $p_v=p_i+p_j\pmod2$。
+      固定融合映射 $f(i,j)$ 与 inverse；交换两个完整融合块的号为
+      $(-1)^{(p_i+p_j)(p_k+p_l)}$。
+      若 seam 只交换 bra 子腿，不能用完整融合块的 parity 代替。
+\item 物理范数和 Rényi 使用普通 $\Tr$。
+      在某些 graded cup/cap 规范中图形闭环自然给出
+      $\str M=\Tr(PM)$，必须加入相应 twist 恢复目标普通 trace。
+      基本检查是 $\Tr I=2$、$\str I=0$（$1|1$ 空间）。
+\item 旋转/镜像需要端口 permutation、对偶方向和可能的物理 gauge。
+      配对振幅含复数相位，不能照抄实数 RK tensor 的 C4v rail 复用。
+      先检验实际 $A$ 和有向转移算子，再决定是否共用四个方向的环境。
+\end{itemize}
+这套显式 swap 规则是标准 fPEPS 收缩方式\cite{corboz}；
+下文关于本项目 replica sewing、six-$R$ 和截断的要求是从这些规则推导的实现方案。
+
+\section{单副本双层：手写公式的适用范围}
+
+手写 note 第 2 页给出的平面布局，可转录为
+\begin{equation}
+ a_{(u,\bar u)(l,\bar l)(d,\bar d)(r,\bar r)}
+ =\sum_k A^k_{drul}\overline{A^k_{\bar d\bar r\bar u\bar l}}
+ (-1)^{\bar u(l+\bar l)+\bar r(d+\bar d)}.
+ \label{eq:handdl}
+\end{equation}
+这里各字母取 $0,1$，指数模 2；融合顺序为 ket 在前、bra 在后。
+这是\emph{该图、该 bra 镜像和该局域单项式约定下的候选双层公式}。
+若改用 $[k,u,l,d,r]$ 的 leg 顺序、反向虚键或不同 cup/cap，须重新推导对应形式。
+\textbf{本次仅验证了 $Q$ 展开，没有用完整二维网络验证式\eqref{eq:handdl}。}
+实施时应由显式线图编译器生成符号，并与该式逐元素对照，而非直接把公式作为基准本身。
+
+在固定平面范数网络里，把所有 swap 吸收入局域 $a$ 后，余下收缩确实可以表现为普通数值张量网络。
+手写页上的“no more swap gates after constructing $a$”应在这个意义下理解。
+但下面三件事并未因此自动解决：
+\begin{enumerate}
+\item 未闭合 boundary/LMPS 端口仍有顺序；两个 even tensor 内部的 odd legs 仍会相交。
+\item 把 ket $i$ 与 bra $\sigma_X(i)$ 重配，会产生新的跨副本线交叉，
+      这些交叉不在原先的 $a$ 中。
+\item 环面闭合、中心接点和远端 cap 的线序不是重复局域 norm tile 的内部线序。
+\end{enumerate}
+所以单副本的 $a$ 可以成为 VUMPS 输入，但其数据契约至少要携带
+ket/bra fusion、parity、arrow、port order 和已吸收的 swap 信息。
+不能只交付一个形状为 $(D^2)^4$ 的数组。
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[>=Latex,node distance=8mm,
+ box/.style={draw,rounded corners,align=center,text width=38mm,minimum height=13mm,font=\small}]
+\node[box] (a) {$Q$、虚键、Fock 顺序\\显式原始网络};
+\node[box,right=of a] (b) {单副本 $a$\\记录已吸收的 swaps};
+\node[box,right=of b] (c) {VUMPS / LMPS\\保留有向端口和 parity};
+\node[box,below=12mm of b] (d) {二/四副本 sewing\\编译新 crossing 和 cap};
+\node[box,right=of d] (e) {带符号 cycle 分解\\及 six-$R$ 中心闭合};
+\draw[->] (a)--(b);\draw[->] (b)--(c);
+\draw[->] (a)|-(d);\draw[->] (c.south)--++(0,-4mm)-|(d.north);
+\draw[->] (d)--(e);
+\end{tikzpicture}
+\caption{单副本吸收与多副本 sewing 必须共享符号规则。下方有限原始网络提供独立核对。}
+\end{figure}
+
+\section{多副本局域张量与 seam 编译}
+\subsection{一个不依赖猜测的构造定义}
+
+对 $k=1,2,4$，指定完整源词：各 ket 网络按 replica-major 排列，
+bra 为所选伴随规范，并使每个波函数的物理输出符合式\eqref{eq:regionorder}。
+构建
+\begin{equation}
+ \mathcal A^{(k)}_{\sigma_X}
+ =\mathcal C_{\mathcal O}\!\left[
+    A_1\otimes_F\cdots\otimes_F A_k
+    \otimes_F A_k^\dagger\otimes_F\cdots\otimes_F A_1^\dagger;
+    P_X^{\rm occ}(\sigma_X)\right].\label{eq:replicatile}
+\end{equation}
+$\mathcal C_{\mathcal O}$ 是在固定端口顺序下的 contraction 编译规则，不是额外物理算符：
+每一次端口移动用逆序公式，每次 cap 用已固定的普通 trace 规范。
+若不能把完整区域 sewing 局域化，保留从区域顺序转换产生的 parity string/MPO，
+而不是强行假设 $\mathcal A$ 仅依赖一个 site 的裸腿。
+
+建议先保留 $(k_1,\bar k_1,\ldots,k_k,\bar k_k)$ 子腿顺序再融合。
+$D=2$ 时，单方向的双层维数为 $4$，二副本为 $16$，四副本为 $256$。
+一个无结构的四副本站点张量会有 $256^4=2^{32}$ 个复数元，约 64 GiB。
+因此即使 $D=2$，也不应先完整物化八层融合站点再考虑压缩；
+有限 oracle 按层/按物理指标 contraction，生产路径使用分块或隐式 matvec。
+
+\subsection{把 bulk permutation 推向边界需要保留端点}
+
+同一区域的相同 replica permutation 可以在精确网络中作内部重标号，
+把缺陷集中在区域边界。对 fermion，伴随这个重标号的 graded 基变换和 sewing 修正也必须一起移动。
+在开放子网络中可能留下沿切口的 parity string、角点算符和远端边界条件。
+因此建议使用如下验证命题，而非直接假定“bulk 都相同，所以 seam 只需 delta”：
+\begin{equation}
+ Z_k^{\rm raw}(L)=Z_k^{\rm bulk+seams+caps}(L)
+ \quad(k=1,2,4),\label{eq:finiteidentity}
+\end{equation}
+在\emph{相同有限几何、相同虚边界、无截断}时逐项核对完整复数值。
+只有通过后，才用一个公共 bulk boundary 加 defect/seam operators 的方案。
+
+\section{six-R：拓扑可沿用，代数不能直接照搬}
+\subsection{现有六个端点的精确归属}
+
+按 core 的约定，$q_{XY}=\sigma_X^{-1}\sigma_Y$，
+得到 $AB:(12)(34)$、$AC:(13)(24)$、$BC:(14)(23)$。
+下表中 $X_{i\bar j}$ 表示区域 $X$ 中 ket $i$ 与 bra $j$ 的一条 LMPS rail。
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+endpoint & 四条 open rails（表内顺序作为起始约定） & cycle\\\midrule
+$R_{AB12}$ & $A_{1\bar1},A_{2\bar2},B_{1\bar2},B_{2\bar1}$ & $(12)$\\
+$R_{AB34}$ & $A_{3\bar3},A_{4\bar4},B_{3\bar4},B_{4\bar3}$ & $(34)$\\
+$R_{AC13}$ & $A_{1\bar1},A_{3\bar3},C_{1\bar3},C_{3\bar1}$ & $(13)$\\
+$R_{AC24}$ & $A_{2\bar2},A_{4\bar4},C_{2\bar4},C_{4\bar2}$ & $(24)$\\
+$R_{BC14}$ & $B_{1\bar2},B_{4\bar3},C_{1\bar3},C_{4\bar2}$ & $(14)$\\
+$R_{BC23}$ & $B_{2\bar1},B_{3\bar4},C_{2\bar4},C_{3\bar1}$ & $(23)$\\\bottomrule
+\end{tabular}
+\end{center}
+它们仍有十二条共享区域/副本边，是 octahedron 的组合结构。
+\textbf{octahedron 的图本身是平面的，但图不记录每个端点的 fermionic 端口循环顺序。}
+是否能用无 crossing 的平面嵌入，要连同这些端口和 cup/cap 一起检查。
+不能由“图是平面的”推出闭合符号为 $+1$，也不能无依据地说 octahedron 必然需要额外负号。
+
+\subsection{需要验证的两周期分解}
+
+bosonic 路径把相对置换的两个不相交 cycle 分别求解。
+fermionic 情况的候选恒等式应写为
+\begin{equation}
+ \mathbb T^{(4)}_{XY}
+ \stackrel{?}{=}U_{XY}^{-1}
+ [\mathbb T^{(2)}_{XY,c_1}\otimes_F\mathbb T^{(2)}_{XY,c_2}]U_{XY},
+ \label{eq:factor}
+\end{equation}
+其中 $U_{XY}$ 包含 cycle grouping 的带符号 permutation，
+并要求两边采用同一个目标 $P^{\rm occ}$ sewing。
+式\eqref{eq:klein}已经显示 cycle 之间的 crossing 可以带 $P_iP_j$ 耦合。
+若这些耦合仅是两端的 $U$，six-$R$ 可以保留；
+若还留有逐层 parity defect 或额外 sector，必须显式带着它们求解。
+
+验证时在小 boundary 维数下构造完整 $\mathbb T^{(4)}$，
+比较其对随机向量的作用与右侧 factorized action，而不是只比较最大本征值。
+再核对 finite length 的 transfer powers 与物理 far cap。
+若式\eqref{eq:factor}不成立，准确的备选是每条 seam 一个完整四副本 endpoint
+（通常八条 retained legs），或一组带 parity 标签的两周期 endpoint；
+不能为了保留“只有六个 $R$”而删掉耦合。
+
+即使式\eqref{eq:factor}成立，若有多个相同模长的主本征值，
+物理 cap 可能选出 $\sum_{ab}c_{ab}R_{c_1,a}\otimes_F R_{c_2,b}$，
+未必是一个张量积。six-$R$ 单端点表示还需要说明主子空间与边界选态。
+
+\subsection{中心闭合的明确方案}
+
+\textbf{推荐初版：中心直接保留显式 swap 网络。}
+用上表的有序四端口和全局 edge list 建立小中心图，把相交门逐步吸收入某个 $R$，
+再交给已有的 contraction optimizer。
+重新选择 contraction tree 可以，但要对\emph{同一个已定义的带符号网络}重新编译；
+不能让 optimizer 自行把 fermionic port permutation 当作无符号换轴。
+
+如果存在统一 parity basis，也可把最终表达写成示意形式
+\begin{equation}
+ Z_4=\sum_{\boldsymbol\alpha}
+ J_\eta(\boldsymbol\alpha)\,
+ R_{AB12}R_{AB34}R_{AC13}R_{AC24}R_{BC14}R_{BC23}.
+ \label{eq:junction}
+\end{equation}
+$\eta$ 记录闭合/sector 约定；$J_\eta$ 是从完整有向线图导出的 crossing/cap 算符。
+若其作用仅在可见 parity 上，则
+$J=(-1)^{c+\sum_e a_ep_e+\sum_{e<f}b_{ef}p_ep_f}$，
+其系数由图导出，不能拟合结果。
+但在一般压缩后的 $\chi$ 空间中，$J$ 可能不是这种标量对角函数，而是投影后的算符或带辅助 parity 线的网络。
+\textbf{只保存十二条边各自的总 parity，未必足够恢复曾跨越 ket/bra 子腿的符号。}
+
+\subsection{二副本复用也需重证}
+
+bosonic reuse table 为
+\begin{center}
+\begin{tabular}{lll}\toprule
+sector & 两个非平凡 endpoint & 两个 identity-cycle metric\\\midrule
+$Z_{2A}$ & $AB12,AC13$ & $S_{BC},S_{BC}$\\
+$Z_{2B}$ & $AB34,BC14$ & $S_{AC},S_{AC}$\\
+$Z_{2C}$ & $AC24,BC23$ & $S_{AB},S_{AB}$\\\bottomrule
+\end{tabular}
+\end{center}
+fPEPS 中复用需要显式 intertwiner $W$ 满足
+\begin{equation}
+ \mathbb T_{\rm target}W=W\mathbb T_{\rm source},\qquad
+ R_{\rm target}=WR_{\rm source},\label{eq:reuse}
+\end{equation}
+以及 cap、端口、sector 和相位的相同映射。
+$W$ 可包含带符号重排、对偶基转换和可验证的 gauge，不能仅是 \code{replaceind}。
+若没通过，用直接二副本解作为独立参考；复用失败不等于物理方法失败。
+$Z_1$ 也要用同一 cap/trace 约定闭合，不能假设所有 $S_{XY}$ 都是单位矩阵。
+
+\section{VUMPS、LMPS 与截断后的 parity 信息}
+\subsection{一副本仍可做，但边界不是无标签数组}
+
+规范变为 $\chi=\chi_{\rm even}+\chi_{\rm odd}$，
+对双层边界 site $M_{\alpha,(v,\bar v),\beta}$，均匀 even 规范中有
+\begin{equation}
+ p_\alpha+p_v+p_{\bar v}+p_\beta=0\pmod2.
+\end{equation}
+SVD/QR、canonicalization 和 metric pseudoinverse 应在 parity 块内执行，
+避免简并时任意混合 even/odd 向量。并记录每个 sector 的保留维数与舍弃权重，
+而不只是总 $\chi$。pairing 系统通常只保留 $\mathbb Z_2$，不能强加粒子数 $U(1)$。
+转移算子的 symmetry-sector structure 也不等于所有本征向量都在同一个 sector。
+
+历史 grown-tail LMPS 的定义为
+$G=LR$、$B=L D_{\rm grow}R$、$H\propto BG^+$。
+这里每次融合、方向变换和 adjoint 都必须使用同一 graded/已吸收符号约定。
+该定义不能称为用户要求的 bare/direct。fPEPS 不会自动解决
+bare ladder、grown-tail 与 VUMPS endpoint 的差别；
+不要因插入了 fermionic swap 就假定 $G_{\rm bare}=G_{\rm grow}$。
+
+\subsection{bare/direct 的定义与首个数值结果（2026-09-17）}
+
+主路线使用实际相对方向的空间边界 $E_t,E_b$，分别求解
+\begin{equation}
+ \mathcal E_{E_t,E_b}(G)=\lambda_G G,\qquad
+ \mathcal E_{E_t,A\bar A,E_b}(B)=\lambda_B B.
+\end{equation}
+两列 $G$ 和三列 $B$ 属于不同的张量空间，不是同一组长大张量端点的乘积。
+所有收缩保留 FermionParity、有向物理腿及 graded 重排。
+若 $G$ 在保留空间满秩，两个区域框架分别取
+\begin{equation}
+ H_A=BG^{-1},\qquad H_B=(G^{-1}\otimes I_{\rm phys})B.
+\end{equation}
+相邻方向独立求 VUMPS；没有以未经证明的旋转对称性替代。
+实现见 \path{benchmark/bare_direct_core.jl}，详细提交记录见
+\path{data/bare_direct_20260917/README.md}，路径相对于 fPEPS 实现目录。
+
+首轮固定 $w=1,\chi=4$，复用原来的 VUMPS 边界张量而重新构造 bare 网络：
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+量 & 结果\\
+\midrule
+bare/direct $\tS$ & $0.439613897919$\\
+历史 grown-tail $\tS$ & $0.434719992643$\\
+两者差值 & $0.004893905276$（约 $1.13\%$）\\
+depth $32,64,128$ 的最大相邻漂移 & $1.22\times10^{-10}$\\
+depth $128$ 归一副本比值的相位误差 & $5.57\times10^{-13}$\\
+完整四副本与周期分解误差（depth $1$） & $3.20\times10^{-15}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+最终熵来自完整 signed 求和。精确 character 简化只作对照，不用于此结果。
+这些检查认证的是所给有限 $\chi$ 网络的收缩，不能替代环境准确性检验。
+重构 $H$ 对独立垂直方向边界的 fidelity per site 为 $0.99998206$，
+闭合条带 $\log Z$ 偏差为 $-3.27\times10^{-4}$，重构后的原生
+Galerkin 残差为 $3.27\times10^{-3}$；重构一致性门槛未通过。
+这不表示输入 VUMPS 本身未收敛，也不单独证明费米子符号出错。
+
+在原坐标中，以独立垂直边界对的 bare 重构 north 与原 south 计算物理 RDM。
+与无限平面 Gaussian 参考比较，二站点 RDM 最大逐元素误差从
+$1.914\times10^{-3}$ 降至 $1.344\times10^{-3}$，三站点从
+$9.570\times10^{-4}$ 降至 $6.941\times10^{-4}$。
+两组 RDM 均通过归一、Hermiticity 和正定性检查；局域精度改善不能证明长距离正确。
+输入环境的 fermion-coupled $\xi_{\rm physical}=3.25654$，
+重构环境的对应值为 $3.50011$，二者不可混为同一项。
+Gaussian 的短条带 purification entropy 也不是上表的无限三分区 $\tS$。
+在 $r=31$，anomalous 关联的相对复数误差由旧 $99.13\%$ 变为新 $98.48\%$，
+connected-density 误差仍约 $100\%$；normal 绝对误差则从
+$2.88\times10^{-6}$ 增至 $4.95\times10^{-6}$。
+有限 $\chi$ 的指数衰减不能保持精确 gapless 长尾，不能以局域改善声称整体通过。
+\status{bare 固定网络收缩通过；熵仍作诊断值，未作物理精度认证}
+
+\subsection{较大 $\chi$ 的 bare 扫描首轮}
+
+同一 $w=1$ 模型固定已有边界，继续用两列／三列 bare 构造。
+最终熵仍使用完整 signed 周期求和，各点在 depth $1,2$ 对照 character；
+未分解四副本图的验证范围仍为前节的 $\chi=4$。
+\begin{center}
+\begin{tabular}{rrrrl}
+\toprule
+$\chi$ & $\tS$ 或实部诊断值 & 最大 depth & 最终相位误差 & 收缩状态\\
+\midrule
+6 & 0.524257409377 & 256 & $4.81\times10^{-13}$ & 长度、相位通过\\
+8 & 0.578186036365 & 512 & $2.40\times10^{-11}$ & 长度、相位通过\\
+12 & 0.837778976592 & 1024 & $2.80\times10^{-9}$ & 长度未过，诊断\\
+16 & 0.855621333865 & 1024 & $6.81\times10^{-7}$ & 相位未过，诊断\\
+\bottomrule
+\end{tabular}
+\end{center}
+$\chi=6,8$ 的长度漂移分别为 $6.96\times10^{-11}$、$1.14\times10^{-13}$。
+$\chi=12$ 最后一次长度变化约 $1.06\times10^{-7}$，端点残差已至
+$5.60\times10^{-14}$；因此保持几何和 caps 不变，另提交 depth $2048,4096$
+延长检查（作业 11268585），首轮结果保留。
+该延长作业已完成：depth $4096$ 的 $\tS=0.8377789765909256$，
+长度漂移 $1.82\times10^{-12}$，相位误差 $2.80\times10^{-9}$，收缩门槛通过。
+$\chi=16$ 在 depth $512,1024$ 的相位误差均约 $6.81\times10^{-7}$，
+不能将实部自动当成有效熵。
+
+$\chi=12,16$ 的输入原生残差分别约 $2.76\times10^{-6}$、$5.67\times10^{-6}$，
+未通过原生收敛门槛；这些大 $\chi$ 尚无独立重构和 Gaussian 精度认证。
+输入环境的 $\xi_{\rm physical}$（$\chi=6,8,12,16$）分别为
+$5.37653,7.43773,35.53221,30.39997$，不应当标成重构 $H$ 的关联长度。
+
+\subsection{单边与双边边界 MPS 的关联长度}
+
+重新测量相同 bare 输入边界的完整偶、奇宇称转移谱，定义
+\begin{equation}
+ \xi_{\rm MPS}=-\frac{1}{\ln|\lambda_1^{\rm self}/\lambda_0^{\rm self}|},\qquad
+ \xi_{\rm pair}=-\frac{1}{\ln|\lambda_1^{\rm pair}/\lambda_0^{\rm pair}|}.
+\end{equation}
+单边 self 使用同一 MPS 与其共轭；双边 pair 使用实际 north/south 空间边界，
+\textbf{不夹 PEPS 列}，空间反向和 pivotal 符号由已验证的 bra 转换处理。
+主模取偶扇区本征值，非主模从两个宇称扇区合并后选择；额外同模本征值
+不会被静默剔除。本次全部完整谱的主非平凡模在奇扇区。
+
+\begin{center}
+\begin{tabular}{rrrrr}
+\toprule
+$\chi$ & $\xi_{\rm MPS}$（完整） & $\xi_{\rm pair}$（完整） & MPS 偶扇区 & pair 偶扇区\\
+\midrule
+4  & 0.997061598 & 2.817517478 & 0.498530799 & 1.408758739\\
+6  & 1.790770989 & 4.999942660 & 0.905593172 & 2.139559068\\
+8  & 2.950437658 & 7.146827277 & 1.487755380 & 2.659399098\\
+12 & 7.707971060 & 35.263604370 & 3.882315764 & 8.952179950\\
+16 & 10.006073770 & 30.176678834 & 5.026509193 & 9.079990358\\
+\bottomrule
+\end{tabular}
+\end{center}
+north、south 与 rotated-north 的单边结果最大相差 $4.24\times10^{-12}$，
+表中列 north。全部本征对 backward error 小于 $9.45\times10^{-16}$，
+双边偶扇区混合通道与直接两列空间收缩的完整矩阵逐基比较一致。
+历史 \path{xi_boundary} 仅为偶扇区，不能直接称为这里的完整 $\xi_{\rm MPS}$。
+$\xi_{\rm MPS}$ 在这些点上单调增加，而完整 $\xi_{\rm pair}$ 在 $12\to16$ 下降；
+这不构成独立截断导致非单调的证明。$\chi=12,16$ 输入原生收敛仍未通过。
+以上是谱长度，未按指定观测量的模式耦合筛选。
+数据与图在 \path{data/direct_chi_curve/bare_boundary_self_pair_xi.*}，
+原始复谱及提交记录在 \path{data/bare_direct_20260917/}，作业 11297706、11297709。
+
+\input{independent_bivumps}
+\input{two_sided_solver}
+
+\subsection{固定目标 $\chi$ 的双边自洽求解：历史记录}
+
+一次性从 $\chi=8$ 压缩到 $4,6$ 不能实现向大 $\chi$ 的自洽推广。
+新增独立求解器在每个目标 $\chi$ 同时更新实际上下边界，重新求取混合
+$T$ 通道与重叠通道的左右固定点，构造 $H_{AC},N_{AC},H_C,N_C$。
+局部广义本征方程满足归一化关系
+\begin{equation}
+ z_{AC}=\lambda_{\rm row}z_C,
+\end{equation}
+因为 $AC$ 方程比 $C$ 方程多一个局部 PEPS 张量。
+每次更新后重新计算整对环境，检查双方原始及去度量的驻点残差和本征值一致性；
+内层本征向量残差或相邻两步 fidelity 不足以认证外层收敛。
+新联合判据与原 self-Galerkin 判据分别保存，不覆盖原生收敛标志。
+
+初步 $\chi=4$ 经 19 步达到联合残差 $7.10\times10^{-9}$，
+$\xi_{\rm pair}=4.261892833$。$\chi=6,8$ 的单调残差更新暂时停滞，
+尚未通过联合判据；另已提交阻尼交替更新和从已收敛 $\chi=4$ 向上扩维。
+扩维后的旧边界仅是初态，每一级必须在目标 $\chi$ 重新自洽。
+$\xi$ 仅作诊断，不作为越大越好的目标，不预设其单调性。
+新解还需独立旋转方向边界、Gaussian 观测量对照和原 bare/direct 熵检查，
+不能沿用旧熵，也不能仅凭驻点残差认定物理解正确。
+后续 $\chi=6$ 经阻尼交替及独立 Jacobian 求根找到同一驻点，联合残差最低
+$1.46\times10^{-11}$，$\xi_{\rm pair}=15.837189840$；但两点密度矩阵的
+Hermiticity Frobenius 误差为 $4.81\times10^{-4}$，故物理验收失败，不作为可信熵点。
+新 $\chi=4$ 两点 Gaussian 密度矩阵最大误差为 $7.77\times10^{-4}$，旧解约
+$1.91\times10^{-3}$；完整 $\xi_{\rm MPS}=1.170877180$，
+$\xi_{\rm pair}=4.261892833$，有权重的单粒子物理通道 $\xi=4.788325859$。
+独立求解旋转方向后，原 bare/direct 得到 $\widetilde S=0.490388307343$，
+最大最终相位误差约 $3.69\times10^{-9}$，长度及端点检查通过。
+这是该有限 $\chi$ 联合边界的收缩结果，尚不代表无限 $\chi$ 熵已认证。
+实数表示中的后续精修将原方向和实际旋转方向的联合残差分别降至
+$1.32\times10^{-14}$ 与 $2.25\times10^{-14}$。
+重新运行完整 bare 检查得到 $\widetilde S=0.4903883073405$，
+depth $128$ 的相位误差为 $1.09\times10^{-14}$，端点残差为
+$1.03\times10^{-15}$；与前次熵相差约 $3\times10^{-12}$。
+对应完整 $\xi_{\rm MPS}=1.170877010$、$\xi_{\rm pair}=4.261892829$。
+
+对实际行本征值商的变分梯度作求根，在 $\chi=8$ 找到联合残差
+$9.04\times10^{-12}$ 的新驻点。其完整谱给出
+$\xi_{\rm MPS}=2.840836649$、$\xi_{\rm pair}=241.3402590$。
+一至三点密度矩阵的厄米性、归一化和正定性通过；两点 Gaussian
+最大误差为 $1.35\times10^{-4}$，优于原生 $\chi=8$ 的 $3.41\times10^{-3}$。
+但连通密度关联在 $r=31$ 为 $2.85\times10^{-4}$，Gaussian 仅为
+$1.09\times10^{-7}$，出现明显错误的慢衰减尾部。
+normal/anomalous 算符耦合的物理衰减长度为 $11.93884$，密度通道则为
+$137.08620$。因此该点不能仅凭驻点收敛或大 $\xi_{\rm pair}$ 获得物理认证，
+也未被加入可信熵曲线。
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{../../code2d/fpeps/data/direct_chi_curve/joint_chi8_physical_checks.pdf}
+\caption{$\chi=8$ 的独立物理核对。红色联合驻点的局域误差减小，
+但远距离密度关联明显偏离 Gaussian。右图使用保留正负号的对称对数坐标，
+奇、偶距离分别连线，避免把非物理的负连通关联隐藏在绝对值中。}
+\end{figure}
+
+另一个有限精度问题出现在双边同时作用一行 $T$ 后再截断的试验中。
+$\chi=8$ 原始增长张量的混合通道具有双重主本征值，数值模间隙约
+$10^{-15}$；正则化后出现约 $7\times10^{-8}$ 的劈裂。
+此时单独选择一个主本征向量构造双边度量不可靠。
+该发现仅适用于这项双边增长试验，不能直接归因到原有 VUMPS 的全部停滞。
+零 Schmidt 支撑消除虽通过态保持检查，但双重主模仍存在，未解决这一问题。
+算法、逐步残差与提交方式见
+\path{data/selfconsistent_pair_20260917/README.md}。
+
+交替单边增长的 Petrov 更新使用当前另一侧边界作为测试空间，每个目标
+$\chi$ 单独迭代。$\chi=32$ 的联合残差先降至 $2.14\times10^{-4}$，随后失稳，
+并因混合主模间隙小于 $10^{-8}$ 而停止；没有新的可信大 $\chi$ 熵。
+保存的最低残差候选有 $\xi_{\rm MPS,N/S}=24.9270/25.5407$、
+$\xi_{\rm pair}=59.6810$。两点 Gaussian 密度矩阵最大误差为
+$1.53\times10^{-5}$，anomalous 关联在 $r=31$ 的相对误差为 $1.72\%$。
+但连通密度同一距离为 $3.01\times10^{-7}$，Gaussian 为 $1.09\times10^{-7}$，
+误差大于旧 $\chi=32$ 的结果。因此局域改善不能替代联合收敛和长程核对。
+
+后续将新旧左正则张量输运到同一虚腿规范并对齐整站相位，分别测试
+$\alpha=0.25,0.1$ 的阻尼，$\chi=32$ 均在续算后失稳；$\chi=8$ 也仅减慢漂移。
+历史外推的修复版本在 $\chi=8,32$ 分别停滞于联合残差
+$2.58518\times10^{-3}$、$2.99242\times10^{-4}$，未达到驻点。
+初版外推的拒绝候选曾覆盖当前态，该版本终态已作废；修复版增加了保存态
+与最后接受行的残差一致性检查，并重新通过规范和相位审计。
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\linewidth]{../../code2d/fpeps/data/direct_chi_curve/damped_petrov_iterations.pdf}
+\caption{独立目标 $\chi$ 的阻尼对照，均未收敛。横轴为累计步长
+$\sum\alpha$，不是物理时间；$\chi=32$ 的阻尼从未阻尼第 20 轮状态开始。}
+\end{figure}
+
+大 $\chi$ bare 前置矩阵的独立预检通过：$\chi=4$ 与原核心的四张量
+$G,B,H_A,H_B$ 完全一致；$\chi=32$ 的完整 $G/B$ 谱维数为 $512/2048$，
+行权重与联合方程相差 $2.93\times10^{-14}$，矩阵求逆误差为
+$1.96\times10^{-12}$。此预检没有计算四副本熵，原 bare 核心未改动。
+
+\paragraph{完整简并主空间的增长与截断。}
+双边同时增长后的原 $\chi=8$ 案例有两个偶宇称主模。
+对完整主空间按实际 graded 迹配对对偶化，构造
+$D_N=m^{-1}\sum_i r_i l_i^{\rm dual}$、
+$D_S=m^{-1}\sum_i l_i^{\rm dual}r_i$，其中 $m=2$。
+主空间内基底变化不变性及独立复非酉虚腿规范协变检查通过。
+先保留 $2\chi$ 再作宇称保持分块，可以获得两个实际维数为 $\chi$ 的分量。
+在 $\chi=8$，两分量经显式 odd 虚腿规范和相位对齐后的局部张量差小于
+$2.5\times10^{-12}$；各分量的单边偶固定点唯一。
+这些是本次张量的数值检查，不能把所有费米子主模简并均当作可删除的副本。
+
+完整迭代中，$\chi=4$ 在第 69 轮达到截断映射固定点，
+$\xi_{\rm pair}=4.2910270389$，但联合 Galerkin 残差仍为
+$1.38485\times10^{-4}$。$\chi=8$ 的联合残差先降到
+$2.61741\times10^{-3}$，随后 $\xi$ 漂移到约 $1146$；
+下一轮混合主模间隙约 $2.3\times10^{-12}$，未通过唯一性检查。
+所以这项分块修正尚未解决外层不稳定。
+截断映射固定点、VUMPS 驻点、物理关联函数和 bare 收缩需分别检验，
+此处没有新增可信大 $\chi$ 熵。
+历史加速用 5 步复现 $\chi=4$ 的截断固定点（映射残差 $1.35\times10^{-11}$），
+但 $\chi=8$ 仍停滞于映射残差 $1.10\times10^{-2}$；三轮复非酉规范控制通过。
+$\chi=4$ 的短条带物理性检查通过，两点 Gaussian 误差 $7.71\times10^{-4}$，
+$\xi_{\rm MPS,N/S}=1.1738678953$。
+
+\paragraph{不构造完整 Hessian 的驻点求解。}
+另用有限差分 Hessian-vector product 与 Krylov 子空间求实际混合行权重的驻点。
+梯度试探仅需 $H/N$ 缩并，完整联合验收仍保留原有度量求逆和 AC/C 检查。
+两档差分一致性、Hessian 双线性对称性及标量方向导数分别核对。
+$\chi=4$ 两步回到联合残差 $1.09\times10^{-10}$、
+$\xi_{\rm pair}=4.26189284$；与完整 Hessian 的方向作用相差小于
+$2.49\times10^{-7}$。
+$\chi=32$ 自适应缩小差分扰动后完成一次更新，梯度约减半，但联合残差
+从 $2.05\times10^{-4}$ 升至 $1.13\times10^{-3}$；
+$\chi=12$ 续算也出现梯度降低而联合残差升至 $0.249$ 的情况，均未收敛。
+
+$\chi=32$ 的方向约束初态有
+$\xi_{\rm MPS,N/S}=25.5406644451$、$\xi_{\rm pair}=59.7531442910$。
+其两点 Gaussian 密度矩阵误差为 $1.53733\times10^{-5}$，与约束前接近；
+$r=31$ 连通密度为 $3.17576\times10^{-7}$，Gaussian 为
+$1.09259\times10^{-7}$，比约束前稍差。这是更新前环境的独立诊断，
+不能继承为后续候选的物理检查或 bare 熵认证。
+
+\paragraph{弱方向上的差分精度与直接本征响应。}
+扩大 Krylov 空间后，$\chi=12$ 某一步的预测线性残差约为
+$1.86\times10^{-11}$，而沿所得方向重新计算为 $0.918$。
+因此不能仅依据基向量差分检查或投影方程预测值认证 Newton 步。
+独立旋转 $\chi=32$ 的五步试算也未收敛，联合残差约为 $0.122$。
+
+新增直接响应方法，对实际 graded 通道 $Mx=\lambda x$ 解
+\[
+\begin{pmatrix}M-\lambda I&-x\\x^\dagger&0\end{pmatrix}
+\begin{pmatrix}\delta x\\\delta\lambda\end{pmatrix}
+=\begin{pmatrix}-(\delta M)x\\0\end{pmatrix}.
+\]
+$\delta M$ 由原有 transfer 的双线性项构造；有效张量的归一化导数和
+canonical 回缩曲率项均保留。$\chi=4,12$ 的完整 Hessian 对称性误差为
+$4.25\times10^{-15}$、$1.44\times10^{-13}$，作用线性误差约
+$2.1\times10^{-15}$；与实际标量方向导数和多档有限差分的交叉核对通过。
+使用该响应求根，$\chi=4$ 两步达到完整联合残差 $7.66\times10^{-11}$。
+新的求解仍需通过原有联合、物理和熵判据；小 $\chi$ 控制不认证大 $\chi$。
+
+完整 $G/B$ 预检接入 bare 副本流程的端到端回归也通过：
+$\chi=4$ 的拟合结果为 $\tS=0.49038830734036765$，与原程序保存值相同；
+深度 $128$ 的相位及端点误差分别为 $1.09\times10^{-14}$、
+$1.03\times10^{-15}$。缓存使用前核对原始边界及张量内容，仍未新增可信大 $\chi$ 熵。
+
+\paragraph{固定目标 $\chi$ 与最新稳定性检查。}
+向大 $\chi$ 推广采用每个目标维度分别求解双边环境；早期由 $\chi=8$
+压缩的实验仅作截断诊断。局域物理支撑基使用小 $\chi$ anchor 不限制虚键维度，
+$\chi=32$ 已直接从原有 $\chi=32$ 环境启动。$\xi$ 是诊断输出，
+不以最大化 $\xi$ 或强迫其随 $\chi$ 单调作为优化目标。
+先前主要比较 $\chi=4$ 控制与 $\chi=32$ 压力测试，尚不足以检验逐步推广。
+目前优先补齐 $\chi=6,8,12,16,24$，统一使用解析响应、完整通道梯度和
+自适应标量导数检查的 trust-region 算法。各点从对应维度的已有环境重新求解，
+并排队测量双方 $\xi_{\rm MPS}$、$\xi_{\rm pair}$ 与 Gaussian 关联函数。
+这批独立求解尚不证明相邻 $\chi$ 的扩维会回到同一支，亦暂无新的可信熵点。
+解析响应的 trust-region 小 $\chi=4$ 控制得到联合残差
+$7.66\times10^{-11}$；$\chi=32$ 第四轮保存态的残差为
+$5.56\times10^{-4}$、$\xi_{\rm pair}=55.9758$，下一轮触发
+dense 与 Krylov 环境所算梯度的一致性检查，尚未收敛。
+独立扰动两个方向的审计表明，被检查的 $\chi=4,12,32$ 点没有梯度相消：
+两方向梯度范数之和等于总梯度范数，方向间相对差小于 $1.4\times10^{-9}$。
+梯度下降仍不保证完整联合残差下降；所有这些大 $\chi$ 中间态都不认证为熵点。
+最新作业、检查与提交命令持续记入
+\path{data/selfconsistent_pair_20260917/README.md}。
+
+\subsection{双边谱约束的双正交截断试验}
+
+2026-09-17 的早期独立试验从单边 VUMPS 已收敛的 $\chi=8$ 四方向边界
+向 $\chi=4,6$ 压缩；这不等于双边联合方程已收敛。
+用实际双边 mixed transfer 的左右固定点构造 $D=rl$，逐宇称扇区取双正交子空间，
+验证 $P_LP_R=I$，再作
+\begin{equation}
+ A_{\rm new}=(P_L\otimes I\otimes I)A P_R.
+\end{equation}
+$D$ 不是物理密度矩阵，不假定正定；投影保留完整复数符号。
+除了按双边本征权重模截断，还枚举共同保留指标，以两个方向、偶/奇扇区
+各前三个非平凡慢模的对数衰减率误差筛选。此为有限候选的谱匹配试验，
+不是一般变分最优算法，也不强制 $\xi$ 随 $\chi$ 单调。
+四方向不降维 fidelity per site 误差小于 $4\times10^{-15}$。
+
+普通权重截断的 $\chi=4,6$ 分别有 $\xi_{\rm pair}=3.862941445,6.078274089$；
+慢模筛选分别得到 $6.335896979,7.272040645$，来源为 $7.146827277$。
+这些压缩态的原生残差仍为 $10^{-3}$--$10^{-2}$，不继承输入的 VUMPS 收敛标记。
+所有新边界仍接原 bare 两列 $G$、三列 $B$ 和 $H=BG^{-1}$，长度、相位及符号检查不放宽。
+较大的 $\xi_{\rm pair}$ 不能替代 Gaussian 密度矩阵与关联函数对照。
+
+输入审计还发现，旧的独立旋转 south 虽单边收敛，与旋转 north 配对后却有
+两个相反相位的主模，偶扇区模间隙仅 $1.04\times10^{-11}$。
+重新独立求解旋转 south（原方向 north 仅作初态）后，原生残差为 $8.86\times10^{-13}$，
+主模唯一，两个方向的源 $\xi_{\rm pair}$ 相差约 $5\times10^{-9}$。
+此处没有使用未经证明的方向变换；原 bare 三输入不变。
+完整提交命令、候选、物理对照和状态见
+\path{data/paired_truncation_20260917/README.md}，
+汇总表图见 \path{data/direct_chi_curve/paired_xi_truncation.*}。
+
+\subsection{只保留总 parity 不等于能重建全部 seam}
+
+设 $W$ 是从保留空间到原始 cut 的 isometry，$P_s$ 是 seam 需要的 parity/string operator。
+安全的压缩是保存
+\begin{equation}
+ P_s^{\rm eff}=W^\dagger P_sW,\qquad
+ \delta_s=\|(I-WW^\dagger)P_sW\|.\label{eq:string}
+\end{equation}
+若 $\delta_s\ne0$，则即使 $P_s^2=I$，也未必有 $(P_s^{\rm eff})^2=I$。
+例如总体 ket+bra parity 可以是边界对称性，但单独 ket parity 并不必然守恒。
+不能无证据地把一个 retained index 强行拆成独立 ket/ bra parity eigenlabels。
+解决方式是保留相应 string MPO 与压缩矩阵元，
+对所需 operator closure 扩充保留子空间，或直接联合压缩多副本环境。
+非正交 endpoint maps 则须用对应 metric/dual maps 替代这里的 $W^\dagger$，并报告条件数。
+
+这也是为何“先算 norm 的 $\chi$，再取 $\chi^{\otimes4}$”是一种近似策略，
+不是对所有 replica defect 的严格保证。
+必须同时检查 bulk boundary residual 和 defect observable 的 $\chi$ 收敛；
+在临界态中，两者可能需要不同精度。
+
+\subsection{固定点的 sector、振幅与相位}
+
+对一个简单孤立主本征值，令 $\langle l|r\rangle=1$，则
+\begin{equation}
+ T^n|b\rangle\sim\lambda^n|r\rangle\langle l|b\rangle.
+\end{equation}
+应保留 $\lambda$ 与 $\langle l|b\rangle$ 的完整复数信息。
+若按最大模值选了与物理 cap 正交的 sector，即使残差很小仍是错误的 endpoint。
+有简并、负/复的同模长主值时应保留主子空间或做显式 finite-tail 极限，
+不能总假定一个 unit-norm 固定点足够。
+
+目前 \code{sixr\_closure.jl} 多处通过 \code{log(abs(z))} 形成观测量。
+新 backend 应先输出每个 $Z_k$ 的 $(\log|Z_k|,\arg Z_k)$ 与归一化账本，
+再检查最终比值相位是否符合目标的有限网络参考。
+范数和 purity 必须为非负实数；cube 至少要先核对其完整相位，再判断采用的熵分支。
+不能把负号、零值或显著虚部自动压成一个看起来平滑的实数熵。
+
+\section{代码改动范围与两条可行实现路线}
+
+建议新增独立 fermionic backend 与 metadata 类型，先不改变已验证的 RK/TFIM production 路径。
+以下是读过的接口及需要补充的内容；没有在本次 note 工作中修改它们。
+\begin{longtable}{p{0.43\textwidth}p{0.51\textwidth}}
+\toprule
+现有位置/操作 & fermionic 版本的要求\\\midrule\endhead
+\code{core/state.jl}：\code{layer}、\code{double\_layer}
+& $A^*$ 的端口/伴随约定；双层内部 swap；保存原始 ket/bra 融合字典。\\
+\code{core/indices.jl}：普通 \code{Index} 标签
+& 标签只能指定 connectivity；增加 parity、arrow、ordered ports、fusion map 和符号约定版本。\\
+\code{vumps/src/quantum\_sixr.jl}：
+\code{\_quantum\_transfer\_site}
+& 目前显式循环计算 $A\bar A$，无手写式\eqref{eq:handdl}的 crossing 因子；
+不能仅换入 fPEPS 数组。\\
+同文件：\code{\_host\_array}、\code{\_quantum\_boundary\_array}、grown tensor
+& typed contraction 已注意 dual twists，但转 dense 后要保留 graded fusion/basis map；
+有 TensorKit 容器不代表后续普通 ITensor 计算已自动 fermionic。\\
+\code{core/sixr\_closure.jl}：rail orientation、\code{m2\_split\_boundary}
+& 区分存储换轴与实际端口交换；split 必须是保存的 fusion map 的逆。\\
+同文件：\code{m2\_seam\_wiring}、\code{m2\_seam\_apply}
+& 编译带符号的 sewing；核对源词、目标词和 far cap，而非只把索引设成相同。\\
+\code{core/sixr.jl}：\code{SIXR\_RAILS}
+& 保留现有拓扑表；另加四端口顺序、对偶方向、parity operator 与 sector 信息。\\
+\code{m2\_close\_octahedron}、\code{m2\_relabel\_endpoint}
+& 前者实现完整中心 swap/cap 网络；后者实现式\eqref{eq:reuse}的 $W$。\\
+\code{m2\_endpoint}、五 sector 的 log 组合
+& 保留 cap amplitude、主子空间和复相位，增加相位失败与零范数诊断。\\\bottomrule
+\end{longtable}
+
+\paragraph{路线 A：显式 swap + 现有普通数值 contraction。}
+构造有序腿的数据类型和一套 swap 编译器，
+把 crossing 吸收进 local double layer、seam tiles 和小中心网络后再转成普通 ITensors。
+优点是每个号能与手写图对照，适合最初的精确验证。
+约束是任何会改变逻辑端口顺序的新 contraction 路径都必须经编译器，不能绕开。
+
+\paragraph{路线 B：端到端 graded tensor backend。}
+从 $V=\mathbb C^{1|1}$ 到 VUMPS、LMPS、seam 和闭合，全程使用实现 fermionic braiding 的空间类型与有向 map。
+这可减少手工维护的 swap，但仍需自己定义正确的 $P^{\rm occ}$ 与普通 trace。
+具体库版本是否支持相应空间、转换是否保留它们，要在实施时核对本地依赖并用小 tensor 测试；
+本 note 不把未查证的 API 当作可运行方案。
+尤其“有 $\mathbb Z_2$ charge block”不等于“交换采用 fermionic braiding”：
+bosonic $\mathbb Z_2$ 对称张量也有同样的 charge 分块。
+
+\paragraph{独立参考：Gaussian Schur complement。}
+直接从局域 Gaussian map 和虚键 covariance 投影得到 $\Gamma$，
+与局域系数 fPEPS 的 covariance 和 replica 标量比较。
+按 KSVC 的 covariance 约定，输出具有
+$\Gamma_{\rm out}=A_G+B_G(D_G-\Gamma_{\rm in})^{-1}B_G^T$ 的形式；
+换 Majorana/cup 约定会改变相应符号，必须用单键和两站点检查固定。
+这是验证 fPEPS 的有力第三条路径，但不能代替对截断后 six-$R$ 网络的验证。
+
+\section{实施阶段、通过条件及本次已做的检查}
+\subsection{建议分阶段推进}
+
+\begin{longtable}{p{0.10\textwidth}p{0.35\textwidth}p{0.46\textwidth}}
+\toprule
+阶段 & 产物 & 通过条件\\\midrule\endhead
+0 & 本文约定、$A$ 表与线序基础操作
+& CAR 矩阵、graded permutation composition、fusion/unfusion、ordinary trace 全部一致。\\
+1 & $1\times2,2\times1,2\times2$ 显式 fPEPS oracle
+& 从全局有序算符式独立求振幅；交换虚键方向并同步变换后状态相同；
+Fock overlap/covariance 一致。不要只比范数。\\
+2 & 同一有限态的五个 replica sectors
+& 显式八/四/双层 contraction 与式\eqref{eq:occupation}、Gaussian 逐项一致；
+同时检查未分区连续的排列转换、复数态、不同合法边界。\\
+3 & 单副本双层与有限 boundary MPS
+& 显式原始范数 vs 局域 $a$；无截断 boundary 收缩完全一致；
+奇偶分块截断后协方差/局域观测量随 $\chi$ 收敛。\\
+4 & 有限 LMPS seam/cap/中心
+& 式\eqref{eq:finiteidentity}成立；换 contraction tree、端口规范后完整 $Z_k$ 不变；
+这一步优先于无限固定点。\\
+5 & cycle 分解、six-$R$ 与复用
+& 式\eqref{eq:factor}的 operator action、式\eqref{eq:reuse}、cap 投影、
+完整四副本与六端点 closure 均一致。\\
+6 & 固定严格 $D=2$ 的无限环境扫描
+& $\chi$、主 sector、far-tail 长度与各 $Z_k$ 独立收敛；再研究 $\tS$ 对 $\xi_\chi$ 的变化。\\\bottomrule
+\end{longtable}
+
+阶段 1--5 的小尺寸 double precision 绝对/相对目标可以从 $10^{-12}$ 开始，
+但若 $Z$ 极小或 metric 病态，应改用相应尺度或高精度；不应强求不合理的相对误差。
+\emph{没有}在本次完成阶段 1--6；它们是下一轮实现的明确验收标准。
+
+\subsection{最有区分力的反例和控制组}
+
+\begin{enumerate}
+\item 真空积态与偶总宇称的 occupied product state：所有归一化 purity/cube 为 1，$\tS=0$。
+      后者能发现 FSWAP 与普通 SWAP 的混淆，真空不能。
+\item $(|00\rangle+\lambda|11\rangle)/\sqrt{1+|\lambda|^2}$ 分布在 $A,B$，$C$ 为积态。
+      令 $p=(1+|\lambda|^4)/(1+|\lambda|^2)^2$，应有
+      $\gamma_{2A}=\gamma_{2B}=p$、$\gamma_{2C}=1$、$\gamma_4=p^2$、$\tS=0$。
+\item 四到六模随机复 Gaussian 态，包含 odd/ even 全局 parity 样本及非连续原始分区。
+      先做正确 Fock 重排再比对，避免所有测试碰巧没有 crossing。
+\item 对 all-even 的人工腿空间，应精确退化为现有 bosonic 六端点 closure。
+      但这一控制组自身不能认证 fermionic 符号。
+\item 改变局域 leg order、有向 bond convention、相邻交换分解和 contraction tree，
+      同步变换全部张量/算符后标量不变。改变 spin structure 则可能改变物理态，不要求不变。
+\item 独立缩放每个 endpoint 及 metric，核对式\eqref{eq:ratio}的模与相位抵消。
+      这一测试不能检出所有共同漏号，必须结合原始有限网络比较。
+\end{enumerate}
+
+\subsection{本次真实验证记录与限制}
+
+伴随 \code{check\_signs.py} 通过 Slurm job \code{11211749} 运行，
+补充显式 SWAP 矩阵检查后由 \code{11211764} 重跑通过；结果存于 \code{checks.json}：
+\begin{center}
+\begin{tabular}{p{0.57\textwidth}p{0.36\textwidth}}\toprule
+检查 & 结果\\\midrule
+$Q$ 外代数展开 vs $32\times32$ CAR 矩阵 & 最大误差 $0$；16 个非零元\\
+逆序符号 vs 相邻交换序列 & 384/384 通过\\
+Fock 重排后的 covariance & 最大误差 $1.11\times10^{-16}$\\
+四模 grouped occupation cube vs Gaussian determinant 幅值 & 误差 $5.55\times10^{-16}$\\
+Gaussian glue 的 $g_X^2=-I$ 与 $g_Ag_B=-g_C$ & 精确成立\\
+两套纯态 replica gauge 的字典 & 共轭 $r=(234)$ 成立\\\bottomrule
+\end{tabular}
+\end{center}
+这些检查不包括完整 fPEPS patch、式\eqref{eq:handdl}、VUMPS、LMPS 或 six-$R$。
+已有 Gaussian 程序的其他规模测试属于其原有证据，本次没有重新运行它们。
+
+\section{后续物理问题：先把符号和有限环境误差分开}
+
+建议第一组研究量是在固定严格 $D=2$ 临界 KSVC 张量上，扫描 $\chi$，
+同时记录 boundary 残差、各 seam residual、各 parity sector 的谱、
+$Z_1,Z_{2X},Z_4$ 的对数模/相位与 $\tS$。
+关联长度应写明来自哪个 transfer channel：
+\begin{equation}
+ \xi=-\ell\big/\ln|\lambda_1/\lambda_0|.
+\end{equation}
+费米子 Green function 常涉及 odd/string channel，密度等 even observable 涉及不同 sector，
+boundary MPS 自转移的 $\xi_\chi$ 也不必等于物理单粒子 $\xi$。
+与 Gaussian 的 finite-size 或 mass regulator 对比时，要用同一几何、junction 数目和明确的 length 定义。
+有限 $\chi$ 不能未经检验直接视为在原始 Hamiltonian 中加某个 mass。
+
+若以后需要一族严格有限 $D$ 态，可从 Gaussian projector 参数形变出发，
+逐点计算 covariance 并验证 parent Hamiltonian。
+直接给现有 Hamiltonian 加任意质量项，通常不能据此保证 GS 仍由同一个 $D=2$ 局域结构精确表示。
+这一步应在符号基准通过后开展；目前最有价值的基准正是一个固定且严格可知的态。
+
+\bigskip
+\noindent\textbf{需要下一轮真正求解的核心问题：}
+在式\eqref{eq:occupation}的目标约定下，把完整有限 fermionic replica 网络缩到 LMPS cut 后，
+其 crossing/string 信息是否能由现有六个 rank-four endpoint 的保留空间忠实承载？
+本文给出了判断它的 operator、cap 和 finite-network 检查，也给出了不成立时的完整四副本备选。
+因此无需预先赌一个普适的“六个 $R$ 外再乘一个负号”公式。
+
+\begin{thebibliography}{9}
+\bibitem{hand} 用户手写参考：\href{../../fPEPS_renyi_2.pdf}{\code{PEPS/fPEPS\_renyi\_2.pdf}}，
+2 页；第 1 页为 projector、bond、swap convention，第 2 页为双层候选公式与多副本问题。
+\bibitem{ksvc} C. V. Kraus, N. Schuch, F. Verstraete, J. I. Cirac,
+\emph{Fermionic Projected Entangled Pair States}, Phys. Rev. A 81, 052338 (2010),
+\href{https://arxiv.org/abs/0904.4667}{arXiv:0904.4667}。
+本文核对了本地 \code{Gaussian/note/0904.4667v2.pdf} 的 Eq.~(4)、Gaussian example 和 Appendix A。
+\bibitem{corboz} P. Corboz, R. Orús, B. Bauer, G. Vidal,
+\emph{Simulation of strongly correlated fermions in two spatial dimensions with fermionic projected entangled-pair states},
+Phys. Rev. B 81, 165104 (2010),
+\href{https://arxiv.org/abs/0912.0646}{arXiv:0912.0646}，特别是 parity、swap 与 open-leg ordering 的规则。
+\bibitem{methods} 当前 PEPS 方法：\href{../detailed.pdf}{\code{PEPS/notes/detailed.pdf}}，
+源文件 \code{methods.tex}；six-$R$ 字典与实现位于 \code{code2d/lmps/core/}，
+quantum bridge 位于 \code{code2d/lmps/vumps/src/quantum\_sixr.jl}。
+\bibitem{gaussian} Gaussian 项目 note：
+\href{../../../Gaussian/note_gaussian_en/main.pdf}{\code{Gaussian/note\_gaussian\_en/main.pdf}}；
+核对代码为 \code{maj\_tools.py}、\code{cube\_bdg.py}、\code{cube\_bdg\_validate.py}、
+\code{bigcube.py}、\code{run\_point.py}、\code{cirac2\_model.py}。
+注意正文列出的普通 replica 与有向 Gaussian glue 的区别。
+\end{thebibliography}
+\end{document}

@@ -1,0 +1,164 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=24mm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,microtype,xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
+\newcommand{\tS}{\widetilde S}
+\newcommand{\Dg}{D_{\rm grow}}
+\title{From RK--Ising and TFIM states to LMPS replica observables\\\large Concise methods guide}
+\author{Project methods note}\date{9 September 2026}
+\begin{document}\maketitle
+\noindent This guide summarizes the computation and its limits. Tensor diagrams,
+index conventions and implementation details are in the
+\href{detailed.pdf}{detailed methods note}.
+
+\section{State preparation is not boundary VUMPS}
+For RK--Ising,
+\[
+ |\Psi_\beta\rangle=Z^{-1/2}\sum_s
+ e^{\frac\beta2\sum_{\langle ij\rangle}s_i s_j}|s\rangle,
+ \qquad s_i=\pm1.
+\]
+Factor $e^{\beta st/2}=\sum_uQ_{su}Q_{tu}$ and set
+$A^s_{uldr}=Q_{su}Q_{sl}Q_{sd}Q_{sr}$. This is an exact $D=2$ PEPS, not a
+variationally optimized state. Its norm is the classical Ising partition
+function, providing an absolute free-energy check. The half in the Boltzmann
+exponent is elementwise, not a matrix square root of the full Boltzmann matrix.
+
+For the square-lattice TFIM, with Pauli matrices,
+$H=-\sum_{\langle ij\rangle}\sigma_i^z\sigma_j^z-h\sum_i\sigma_i^x$.
+Current production minimizes the PEPS energy with AD through CTMRG, initialized
+from random tensors, simple update, or saved continuation states. Simple update
+is an initializer, not a variational convergence certificate. Retain both
+continuation branches, energies, projected gradients and source-state hashes;
+recheck selected tensors with fresh environments.
+
+\textbf{VUMPS subsequently solves the norm-transfer boundary of the saved
+PEPS; it is not the current TFIM PEPS optimizer.} Distinguish PEPS dimension
+$D$, optimization environment dimension $\chi_{\rm CTM}$, and measurement
+boundary dimension $\chi$. Check spatial symmetry on the actual tensor and
+transfer operator before reusing regional boundaries. A symmetric Hamiltonian
+alone is insufficient; spatial C4v, internal Ising symmetry and MPS gauge
+freedom are different notions.
+
+\section{Boundary MPS and local growth}
+Contract the physical spin between PEPS ket and bra to obtain one local norm
+tensor $a_{nwse}$. Its fused ket/bra virtual legs have dimension $D^2$; retain
+their ordering for replicas. $T$ denotes the entire repeated transfer row or
+column, never one $a$. VUMPS approximates its dominant boundary using
+\[
+ A_C^p=A_L^pC=CA_R^p,\quad
+ \sum_p(A_L^p)^\dagger A_L^p=I,\quad
+ \sum_p A_R^p(A_R^p)^\dagger=I.
+\]
+These identities concern specified self-overlap channels, not arbitrary mixed
+spatial overlaps. Check Galerkin, environment and center residuals. Record
+competing low-residual candidates and the selection rule near degeneracy.
+
+One local absorption is
+\[
+ (\Dg^p)_{(\alpha,w),(\beta,e)}
+ =\sum_n(A_L^n)_{\alpha\beta}a_{nwpe}.
+\]
+This creates a bond of dimension $\chi D^2$. It contains one $a$; an entire
+grown tail contains one $a$ at every layer.
+
+\section{Three distinct contraction routes}
+\begin{enumerate}
+\item \textbf{Bare ladders.} Contract the full $M_L|M_R$ ladder to obtain
+$G_{\rm bare}$ and the full $M_L|a|M_R$ ladder to obtain $B_{\rm ladder}[p]$.
+Their open spaces differ. Sector, scale and support compatibility must be
+established before treating $B_{\rm ladder}G_{\rm bare}^{+}$ as the desired LMPS.
+Orient the columns first: in the current north-facing quantum adapter, raw
+west bonds run south-to-north and raw south bonds east-to-west. Exchange
+their left/right axes for a top-to-bottom ladder and a left-to-right reference
+strip, respectively; this is not complex conjugation or a gauge fit.
+\item \textbf{Direct grown-tail: current TFIM production label.} Independently iterate
+\[
+ L_{n+1}=\sum_p(A_L^p)^\dagger L_n\Dg^p,\qquad
+ R_{n+1}=\sum_p\Dg^pR_n(A_R^p)^\dagger.
+\]
+Form $G_{\rm grow}=LR$, $B^p=L\Dg^pR$, and a transfer-normalized
+$H^p\propto B^pG_{\rm grow}^+$. No endpoint checkpoint is imported. This
+does \emph{not} establish $G_{\rm bare}=G_{\rm grow}$.
+\item \textbf{VUMPS endpoint.} Obtain the left/right environments and place the
+center matrix in compatible enlarged-bond coordinates. Form
+$O_V=L_{\rm end}R_{\rm end}$ and
+$B_{\rm end}^p=L_{\rm end}\Dg^pR_{\rm end}$; test
+$B_{\rm end}^p\simeq\kappa A_L^pO_V$. These environments are not arbitrary
+density-projector eigenvectors simply renamed $V_L^\dagger,V_R$.
+\end{enumerate}
+
+No unconditional identity $O_V=G_{\rm bare}$ is assumed. If a replacement
+inserts $Q=R(LR)^{-1}L$ at an original network cut, its error is
+$Z-Z_Q=E_{\rm left}(I-Q)E_{\rm right}$; $Q^2=Q$ does not make this zero.
+Ill-conditioned inverses amplify residuals, so report singular values and
+retained support. Direct/endmap agreement tests those implementations on
+those states; it is not a general factorization theorem or a test of all
+shared downstream code.
+
+\section{LMPS geometry and six-$R$ contraction}
+Regions $A,B$ are the upper quadrants and $C$ is the lower half-plane. Build
+oriented horizontal and vertical rails, transporting every incident retained
+bond consistently. Their shared-chart seam pairs are
+$AB:(v_L,v_R)$, $AC:(h_L,h_L)$, $BC:(h_R,h_R)$; independent regions carry
+their own rail tensors. A vertical rail obtained by reshaping an environment
+is not simply the original $A_R$.
+
+Solve one-copy mixed seam maps $K_{AB},K_{AC},K_{BC}$ with physical far caps.
+Do not replace all of them by identity solely because C4v is available.
+For four replicas, region $X$ pairs ket $i$ with bra $\sigma_X(i)$, with
+\[
+ \sigma_A=\mathrm{id},\qquad\sigma_B=(12)(34),\qquad\sigma_C=(13)(24).
+\]
+The relative two-cycles produce six rank-four endpoints
+$AB12,AB34,AC13,AC24,BC14,BC23$. Their twelve shared regional/copy legs
+close $Z_4$ on an octahedron. The ordinary two-replica sectors reuse them:
+\begin{center}\begin{tabular}{lll}\toprule
+Sector & Rank-four endpoints & Untwisted seam\\\midrule
+$Z_{2A}$ & $AB12,AC13$ & $BC$\\
+$Z_{2B}$ & $AB34,BC14$ & $AC$\\
+$Z_{2C}$ & $AC24,BC23$ & $AB$\\\bottomrule
+\end{tabular}\end{center}
+The untwisted $Z_1$ uses the three one-copy maps. A $Z_{2X}$ is not a bare
+trace of two rank-four tensors. Check left/right eigen-residuals and that the
+physical far cap converges to the chosen endpoint; retain its asymptotic
+amplitude, not just a unit-norm eigenvector.
+
+With synchronized normalization,
+\[
+ S_2(X)=-\ln\frac{Z_{2X}}{Z_1^2},\quad
+ S_2^{(3)}=-\frac12\ln\frac{Z_4}{Z_1^4},\quad
+ \boxed{\tS=-\ln\frac{Z_4Z_1^2}{Z_{2A}Z_{2B}Z_{2C}}}.
+\]
+Remove infinite-seam growth consistently. Independent rescalings of every
+endpoint and one-copy map must cancel in $\tS$. Production components may
+be straight-reference-subtracted constants and need not be positive entropies.
+``S3'' denotes the tripartite quantity, not ordinary R\'enyi order three.
+
+\section{Convergence and reporting}
+Use $\xi=-\ell/\ln|\lambda_1/\lambda_0|$, specifying the channel, eigenvalue
+sector and transfer step length $\ell$. Boundary self-transfer, CTMRG transfer
+and physical connected-spin lengths need not coincide at finite truncation;
+there is no universal factor-of-two correction for broken boundary states.
+
+Fix the saved PEPS while scanning $\chi$. Plot three rows: $\xi(\chi)$,
+$\tS(\chi)$ and $\tS$ against the same run's $\xi$. An optimized finite-$D$
+TFIM state can have a saturated correlation length near the physical transition,
+unlike an exactly critical RK tensor. Bracket a finite-$D$ pseudocritical
+region using dense $h$ scans, branch energies, magnetizations and $\xi(h)$
+at increasing environment accuracy. A largest sampled $\xi$ is not an exact
+critical field. Fit logarithms only in a demonstrated window with systematic
+uncertainties.
+
+Pin source hashes and retain components, seeds, tolerances, condition numbers
+and checkpoints. Individual convergence and paired agreement are separate
+tests; keep failures and missing points visible. All numerical tests and
+plotting run through Slurm.
+
+\paragraph{References.}
+VUMPS: \href{https://arxiv.org/abs/1701.07035}{Zauner-Stauber et al., PRB 97, 045145 (2018)}.
+CTMRG: \href{https://arxiv.org/abs/cond-mat/9507087}{Nishino and Okunishi, JPSJ 65, 891 (1996)}.
+AD optimization: \href{https://arxiv.org/abs/1903.09650}{Liao et al., PRX 9, 031041 (2019)}.
+Finite-$D$ scaling: \href{https://arxiv.org/abs/1803.08566}{Rader and L\"auchli, PRX 8, 031030 (2018)}.
+These references support their stated topics, not a general proof of $O_V=G_{\rm bare}$.
+\end{document}

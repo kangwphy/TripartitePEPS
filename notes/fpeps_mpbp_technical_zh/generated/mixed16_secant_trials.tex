@@ -1,0 +1,15 @@
+\begin{tabular}{rlrrl}
+\toprule
+半径 & 模型 & 原最大残差 & 下降比 & 试步验收 \\
+\midrule
+0.01 & exact\_tangent & $4.441\times10^{-5}$ & 0.3442 & 通过 \\
+0.01 & secant\_1 & $4.435\times10^{-5}$ & 1.0065 & 通过 \\
+0.01 & secant\_2 & $4.435\times10^{-5}$ & 0.9971 & 通过 \\
+0.02 & exact\_tangent & $4.449\times10^{-5}$ & -0.1650 & 拒绝 \\
+0.02 & secant\_1 & $4.434\times10^{-5}$ & 1.0104 & 通过 \\
+0.02 & secant\_2 & $4.434\times10^{-5}$ & 0.9745 & 通过 \\
+0.04 & exact\_tangent & $4.518\times10^{-5}$ & -2.6118 & 拒绝 \\
+0.04 & secant\_1 & $4.578\times10^{-5}$ & -12.4045 & 拒绝 \\
+0.04 & secant\_2 & $4.828\times10^{-5}$ & -19.7055 & 拒绝 \\
+\bottomrule
+\end{tabular}

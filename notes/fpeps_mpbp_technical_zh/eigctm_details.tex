@@ -1,0 +1,115 @@
+\clearpage
+\section{eigCTMRG 分支：更新什么、怎样截断？}
+\takeaway{这里记录实际试过的四角闭环谱投影分支：它更新四个 corner 和四个 edge，
+不是前文更新两条 MPS 的中心残差求根。目录名为 eigctm；其中包括自写的 Schur、
+whole-cluster 与 MP-BP 变体，不能把它们全部称为某篇文献算法的原样实现。}
+
+未知量是环境 $\mathcal C=\{C_{NW},C_{NE},C_{SE},C_{SW},E_N,E_E,E_S,E_W\}$。
+corner 有两条环境腿，edge 有两条环境腿和一条朝向 PEPS 的双层腿。
+\begin{figure}[H]\centering
+\begin{tikzpicture}[x=1.8cm,y=1.05cm]
+\node[envcap] (nw) at (0,2) {$C_{NW}$};\node[r] (n) at (2,2) {$E_N$};\node[envcap] (ne) at (4,2) {$C_{NE}$};
+\node[r] (w) at (0,0) {$E_W$};\node[o] (o) at (2,0) {$O$};\node[r] (e) at (4,0) {$E_E$};
+\node[envcap] (sw) at (0,-2) {$C_{SW}$};\node[r] (s) at (2,-2) {$E_S$};\node[envcap] (se) at (4,-2) {$C_{SE}$};
+\foreach \a/\b in {nw/n,n/ne,ne/e,e/se,se/s,s/sw,sw/w,w/nw,n/o,w/o,e/o,s/o}{\draw[wire] (\a)--(\b);}
+\end{tikzpicture}
+\caption{CTM 环境的实际八个未知张量。$O$ 是局域 PEPS 双层张量，不是额外的优化变量。}
+\end{figure}
+
+吸收相邻 edge 和局域网络，得到四个扩大角 $Q_i$；它们的切口空间含环境腿及新增 PEPS 腿。
+在每个切口，把四角沿有向闭环收缩，得到线性算符 $M_i$。示意为
+\[
+Q_1\longrightarrow Q_2\longrightarrow Q_3\longrightarrow Q_4\longrightarrow Q_1.
+\]
+这里的闭环不能直接当作四个普通数组的乘积：\texttt{graded\_cycle\_v2.jl}
+显式处理 dual、fusion 和 parity twist，包括环境 $\chi$ 腿；闭环用 matrix-unit 插入作过独立符号检查。
+
+\textbf{投影如何得到？} 对每个 parity block 的 $M_i$ 和 $M_i^\dagger$ 分别做有序 Schur 分解，
+选出匹配的右、左不变子空间基 $Z_R,Z_L$。保留完整模长群，并保持指定的 even/odd 秩；
+无法恰好满足秩预算时拒绝该步，不静默减少 $\chi$。这个选择不一定等于简单的最大模前 $\chi$ 个根。
+令
+\[
+Z_L^\dagger Z_R=U\Sigma V^\dagger,\qquad
+R=Z_RV\Sigma^{-1/2},\quad L=\Sigma^{-1/2}U^\dagger Z_L^\dagger.
+\]
+于是 $LR=I$，$P=RL$ 是扩大切口上的斜投影，通常 $L\ne R^\dagger$。
+检查 $M_iR=RK$、$LM_i=KL$、$P^2=P$、$[M_i,P]=0$。
+交叉重叠病态或所选谱群无法分离时拒绝更新。
+这一步的双正交化是\textbf{扩大角的保留子空间}双正交化，不是导出 MPS 后的整条链双正交规范。
+
+\clearpage
+\subsection{四个切口如何一起更新？}
+四套投影都从同一轮冻结的环境计算。令 $P_i=R_iL_i$，相邻切口还必须满足
+\[
+P_iQ_i\simeq Q_iP_{i+1},\qquad i\pmod 4.
+\]
+这个 intertwiner 检查保证角两端选出的子空间相容。通过后才同时压缩扩大 corners 和 edges：
+\[
+C_i'=L_iQ_iR_{i+1},\qquad E_i'=L_{\rm out}\,\widehat E_i\,R_{\rm in}.
+\]
+最后两式表示端口对应的有向张量收缩；实现使用 \texttt{PL/PR} 的 fusion 形式，不能省略 graded 接线。
+\begin{figure}[H]\centering
+\begin{tikzpicture}[node distance=7mm]
+\node[box,fill=rc,text width=11cm] (a) {四角、四边 $\mathcal C_n$};
+\node[box,text width=11cm,below=of a] (b) {吸收网络：扩大角 $Q_i$、四个闭环 $M_i$};
+\node[box,text width=11cm,below=of b] (c) {左右 Schur 子空间 $\rightarrow$ 交叉 SVD $\rightarrow$ 四套 $L_i,R_i$};
+\node[box,text width=11cm,below=of c] (d) {检查秩、谱分离、双正交性、相邻切口 intertwiner};
+\node[box,fill=oc,text width=11cm,below=of d] (e) {同时 renormalize 四角四边，得到 $\mathcal C_{n+1}$};
+\node[box,fill=lc,text width=11cm,below=of e] (f) {导出边界，重新检查中心方程、关联函数和 bare/direct};
+\foreach \a/\b in {a/b,b/c,c/d,d/e,e/f}{\draw[arr] (\a)--(\b);}
+\end{tikzpicture}
+\caption{实际 simultaneous 分支的一轮。局域投影代数通过，不等于外层环境已经驻定。}
+\end{figure}
+
+对应源码位于 \path{benchmark/eigctm/}：
+\texttt{oblique\_whole\_schur.jl} 构造 $L,R$；
+\texttt{whole\_clusters.jl} 选择完整模长群；
+\texttt{simultaneous\_whole.jl} 检查四切口并调用
+\texttt{PEPSKit.renormalize\_simultaneously}。
+这不是完整 periodic-Schur 算法：当前逐切口求子空间，再检查相容性。
+
+阻尼实验使用 $\mathcal C'=(1-\alpha)\mathcal C+\alpha F(\mathcal C)$，但一般非酉 gauge 下
+直接插值张量坐标并不可靠。实验中已区分真正的一步映射阻尼与两个历史环境的插值；
+不能以原始张量差小或投影误差小单独宣布收敛。
+
+\clearpage
+\subsection{Edge 怎样变成 boundary MPS？现在到底收敛了吗？}
+\begin{figure}[H]\centering
+\begin{tikzpicture}[x=1.5cm]
+\foreach \i in {0,2,4}{\node[r] (e\i) at (\i,0) {$E_N$};\draw[wire] (e\i.north)--++(0,.65) node[above] {$s=(u,u')$};}
+\draw[wire] (e0)--(e2);\draw[wire] (e2)--(e4);
+\draw[wire] (e0.west)--++(-.6,0) node[left] {$\cdots$};\draw[wire] (e4.east)--++(.6,0) node[right] {$\cdots$};
+\end{tikzpicture}
+\caption{重复 edge 的两条 $\chi$ 腿，把朝向 PEPS 的 $D^2$ 腿当作 MPS 局域指标。
+这是半平面的候选边界波函数；corners 负责不同方向的连接，并未被当作每个 site 的中心。}
+\end{figure}
+代码 \texttt{boundary\_audit.jl} 实际执行
+\[
+R=\operatorname{InfiniteMPS}(E_N),\quad
+S=\operatorname{InfiniteMPS}(E_S),\quad
+L=\operatorname{InfiniteMPS}(\operatorname{spatial\_bra}(S_r)).
+\]
+$S_r$ 是南边界的右规范张量；空间 bra 映射保留费米腿方向与符号。
+对整个 PEPS 和环境旋转一次，另取一组方向重复检查。因此并非只用一条 edge 代替四向环境。
+导出后各自 canonical 化，再构造两条边界共同的中心算符。
+熵测量仍使用 bare/direct，不改用 grown tail 或 endmap。
+
+\textbf{截至本次文档整理（2026-09-22）的已核对历史记录：}
+\begin{center}\small
+\begin{tabular}{P{30mm}P{64mm}P{44mm}}
+\toprule
+候选 & 观察 & 判断\\\midrule
+$\chi=16$ dense-Schur & 连续 135 步，$\xi_{\rm pair}$ 从 23.81 漂到 67.96，残差约 $10^{-3}$。 & 外层未驻定；不是立刻崩溃。\\
+$\chi=16$ 真正一步阻尼 & 相邻切口误差约 $10^{-12}$，原中心方程误差仍约 $10^{-3}$。 & 投影准确，但未解决环境收敛。\\
+$\chi=8$ CTM 种子加中心精修 & 两方向中心残差约 $5.45\times10^{-12}$、$3.28\times10^{-12}$；RDM 非 Hermitian，replica 相位失败。 & 中心求根成功，但不是可接受物理边界。\\
+\bottomrule
+\end{tabular}
+\end{center}
+最后一行不能算作 eigCTMRG 本身收敛：它额外运行了独立中心求解器。
+两、三点 RDM 的非 Hermitian 范数分别约 $7.00\times10^{-4}$、$1.38\times10^{-3}$；
+bare 的长度漂移很小也不能弥补相位错误。这些候选没有加入可信熵曲线。
+
+\takeaway{结论：edge 到 boundary MPS 的转换已实现；大 $\chi$ 的稳定、物理正确的 eigCTMRG
+环境尚未得到。不能笼统说所有尝试都只是“不收敛”：有外层漂移，也有后处理收敛到不通过物理检查的驻点。}
+本节依据旧实验附册及对应源码整理，不代表本次重新运行数值任务或查询到了新的计算结果。
+详细轨迹及作业编号见 \path{appendix_experiments_v18.tex} 的 CTM 初值与阻尼小节。

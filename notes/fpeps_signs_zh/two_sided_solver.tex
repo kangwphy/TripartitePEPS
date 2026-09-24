@@ -1,0 +1,780 @@
+
+
+\section{旧路线存档：受方向约束的求解器不是严格的双正交 VUMPS}
+\label{sec:biorthogonal-correction}
+
+本节及其后续旧表格记录 2026-09-19 以前的路线；其中“当前”均为历史语境。
+新的独立左右实现见第~\ref{sec:independent-bivumps} 节，不继承本节的数值认证。
+这里必须把旧文档中的“双边 VUMPS”改成更准确的说法。旧路线代码
+\code{selected\_precision\_weighted\_trust.jl} 解的是一个
+target-$\chi$ 的\emph{耦合边界残差问题}，并不是图~\ref{fig:bi-vumps-flow}
+所示的标准 bi-VUMPS。代码用一个参数化的基张量 $a$ 生成
+$S=\mathrm{native}(a)$ 和 $R=\mathrm{move}(S)$，然后在每个 trial 点分别求
+左右 cap 的主固定点，构造 $H_{AC},N_{AC},H_C,N_C$，驱动受约束参数的更新，
+并用完整 joint residual 验收。因而
+\begin{equation}
+  R=\mathrm{move}(S)\quad\text{是当前模型方向约束，}
+  \qquad\text{不是独立的左右 fixed-point 解。}
+\end{equation}
+
+这解释了为什么当前代码中会看到
+\code{joint\_leading(transfer\_left)} 和
+\code{joint\_leading(transfer\_right)}：它们是给定候选边界后的 cap/effective
+channel 求解，不等价于先求出 transfer MPO 的独立左、右 MPS 主固定点。
+代码也没有对左右 MPS 的中心重叠矩阵做一次独立的
+$Q_L^\dagger Q_R=U\Sigma V^\dagger$ SVD，再把左右虚基变换到
+$\widehat Q_L^\dagger\widehat Q_R=I$。因此当前的
+\code{metric\_condition}、\code{metric\_inverse\_error} 和 joint residual
+不能被解释成 biorthogonal gauge 的收敛证据。
+
+还需纠正此前的流程描述：不必先把左右 ordinary VUMPS 各自完全求收敛，
+再作一次重叠 SVD。独立左右态可以从初态开始一起迭代；
+混合有效基底的双正交化应与左右中心更新相配合。
+实际新实现保留显式混合度量，见式\eqref{eq:independent-pencil}及后续推导。
+不能只凭左右 cap 的存在或普通 MPS canonicalization 称为双正交求解。
+
+在 graded fPEPS 中，上述 SVD 必须在每个 parity block 内进行，并且 bra
+方向的 dual/twist 不能被普通复共轭替代。若 overlap block 有很小奇异值，
+不能无记录地加 floor 或删除方向；必须把它报告为 biorthogonalization
+失败，或明确把它作为受控正则化实验。
+
+因此本文后面凡是写“当前双边求解”，均指上述\emph{耦合残差求解器}；只有
+完成独立左右固定点、mixed-gauge SVD 和对应验收后，才应称为“bi-VUMPS”。
+现有 $\chi=4,6,8,12,16$ 数值不能据当前实现自动获得 bi-VUMPS 的物理解释，
+但原有 bare/direct、符号和 Gaussian 对照记录仍保留。
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=.72cm,>=Latex,
+  m/.style={draw,rounded corners,fill=blue!10,minimum width=1.15cm,minimum height=.55cm},
+  op/.style={draw,fill=orange!18,minimum width=1.2cm,minimum height=.6cm},
+  g/.style={draw,fill=green!15,minimum width=1.35cm,minimum height=.6cm}]
+  \node[m] (r) at (0,1.3) {$|R\rangle$};
+  \node[op] (tr) at (2.0,1.3) {$\mathbb T$};
+  \node[m] (l) at (0,-1.3) {$\langle L|$};
+  \node[op] (tl) at (2.0,-1.3) {$\mathbb T$};
+  \draw[->] (r)--(tr);\draw[->] (l)--(tl);
+  \node at (4.0,1.3) {$\mathbb T|R\rangle=\lambda|R\rangle$};
+  \node at (4.0,-1.3) {$\langle L|\mathbb T=\lambda\langle L|$};
+  \node[g] (e) at (2.0,0) {$E=Q_L^\dagger Q_R$};
+  \node at (5.0,0) {$E=U\Sigma V^\dagger$};
+  \draw[->,dashed] (l)--(e);\draw[->,dashed] (r)--(e);
+  \node at (2.0,-2.15) {$\widehat Q_L^\dagger\widehat Q_R=I$ after blockwise SVD gauge};
+\end{tikzpicture}
+\caption{标准非 Hermitian bi-VUMPS 的左右固定点和双正交 gauge。当前生产实现还没有执行这条独立左右 MPS 的 SVD gauge 流程。}
+\label{fig:bi-vumps-flow}
+\end{figure}
+
+\section{技术总览：双边环境、方程与 bare 收缩}
+
+这一节先给出实际代码所解的对象。这里的系统在空间方向是无限的；
+$\chi$ 是边界 MPS 的 bond dimension，$D=2$ 是物理 PEPS 的虚键维度。
+因此我们不先造一个有限的 $L\times L$ PEPS 再截断，而是直接在无限一维
+transfer channel 上求上下两个边界 MPS 的固定点。有限的 $n$ 只出现在
+数学上定义每格本征值的极限，不是数值计算使用的 window size。
+
+\subsection{局域张量和双边环境}
+
+固定物理 Fock 顺序后，一个 site 的 fermionic PEPS 张量写成
+$A^p_{l r u d}$，其中 $p$ 是物理腿，$l,r,u,d$ 是有向虚腿；本例
+$D=2$。把一行 PEPS 与其 bra 叠在一起得到一个有符号的 MPO 行 $O$。
+上下边界是两条独立的无限 MPS：上边界记作 $R=(A_L,C,A_R)$，
+下边界记作 $S=(B_L,D,B_R)$。$S$ 先取空间方向的 bra，并保留
+fermionic graded leg 的方向和 parity；它不是把 $R$ 做一次未经验证的转置。
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=0.72cm,>=Latex,
+  mps/.style={draw,rounded corners,fill=blue!10,minimum width=1.05cm,minimum height=.52cm},
+  peps/.style={draw,fill=orange!18,minimum width=.75cm,minimum height=.58cm},
+  phys/.style={draw,fill=green!13,minimum width=.52cm,minimum height=.45cm}]
+  \node[mps] (r1) at (0,1.55) {$R$};
+  \node[mps] (r2) at (1.45,1.55) {$R$};
+  \node[mps] (r3) at (2.9,1.55) {$R$};
+  \draw[->] (-.75,1.55)--(r1.west); \draw[->] (r1.east)--(r2.west);
+  \draw[->] (r2.east)--(r3.west); \draw[->] (r3.east)--(3.65,1.55);
+  \node[peps] (a1) at (0,.35) {$O$};
+  \node[peps] (a2) at (1.45,.35) {$O$};
+  \node[peps] (a3) at (2.9,.35) {$O$};
+  \node[phys] (p1) at (0,-.55) {$p$};\node[phys] (p2) at (1.45,-.55) {$p$};\node[phys] (p3) at (2.9,-.55) {$p$};
+  \draw[->] (a1.south)--(p1.north);\draw[->] (a2.south)--(p2.north);\draw[->] (a3.south)--(p3.north);
+  \draw[->] (-.75,.35)--(a1.west);\draw[->] (a1.east)--(a2.west);\draw[->] (a2.east)--(a3.west);\draw[->] (a3.east)--(3.65,.35);
+  \node[mps] (s1) at (0,-1.65) {$S$};\node[mps] (s2) at (1.45,-1.65) {$S$};\node[mps] (s3) at (2.9,-1.65) {$S$};
+  \draw[->] (-.75,-1.65)--(s1.west);\draw[->] (s1.east)--(s2.west);\draw[->] (s2.east)--(s3.west);\draw[->] (s3.east)--(3.65,-1.65);
+  \draw[dashed] (-.8,2.15)--(3.7,2.15);\draw[dashed] (-.8,-2.15)--(3.7,-2.15);
+  \node at (4.55,1.55) {上边界 $R$};\node at (4.55,.35) {PEPS 行 $O$};\node at (4.55,-1.65) {下边界 $S$};
+\end{tikzpicture}
+\caption{双边环境的实际对象。横向无限方向由箭头连接；纵向的 $O$ 是一整行
+PEPS transfer MPO。每一个局部求解都重新使用当前的 $R,S$ 构造混合环境。}
+\label{fig:bilateral-environment}
+\end{figure}
+
+\subsection{解的两个固定点方程}
+
+将 PEPS 行夹在 $R,S$ 之间得到混合 transfer channel $\mathcal T_A$，
+直接把上下边界相接得到重叠 channel $\mathcal T_0$：
+\begin{equation}
+  \mathcal T_A(R,S)=\mu_A R,\qquad
+  \mathcal T_0(R,S)=\mu_0 R,
+  \qquad q=\frac{\mu_A}{\mu_0}.
+\end{equation}
+实际实现不把这两个式子当成一个 Hermitian 本征问题；左右固定点、
+混合度量和 fermionic parity 都保留。混合正交中心满足
+$A_C=A_L C=C A_R$。对于上边界，代码分别检查
+\begin{equation}
+ H_{AC}^{(R)}(A_C)=z_{AC}^{(R)}N_{AC}^{(R)}(A_C),\qquad
+ H_C^{(R)}(C)=z_C^{(R)}N_C^{(R)}(C),qquad
+ z_{AC}^{(R)}=q_R z_C^{(R)};
+\end{equation}
+下边界 $S$ 另解同样的三式。最终的 \emph{joint residual} 是两侧的
+AC/C 原始残差、去混合度量残差、$z_{AC}=qz_C$ 关系和两方向行商
+不一致的最大值，而不是只看某个内层 cap 的残差。验收门槛是
+$\epsilon_{\rm joint}<10^{-9}$。
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=0.8cm,>=Latex,
+  box/.style={draw,rounded corners,fill=blue!10,minimum width=1.0cm,minimum height=.55cm},
+  op/.style={draw,fill=orange!18,minimum width=.9cm,minimum height=.65cm},
+  arrow/.style={->,thick}]
+  \node[box] (x) at (0,0) {$X$};
+  \node[op] (o0) at (2,0) {$O_0$};
+  \node[op] (oa) at (2,-1.45) {$O_A$};
+  \node[box] (y0) at (4,0) {$\mathcal T_0(X)$};
+  \node[box] (ya) at (4,-1.45) {$\mathcal T_A(X)$};
+  \draw[arrow] (x)--node[above]{$R,S$}(o0);\draw[arrow] (o0)--(y0);
+  \draw[arrow] (x.south)--++(0,-.55)-|node[pos=.25,below]{$R,S$}(oa);
+  \draw[arrow] (oa)--(ya);
+  \node at (6.0,0) {$\mu_0$ 主值};\node at (6.0,-1.45) {$\mu_A$ 主值};
+  \draw[decorate,decoration={brace,amplitude=5pt}] (5.2,-1.72)--(5.2,.28)
+    node[midway,right=7pt]{$q=\mu_A/\mu_0$};
+\end{tikzpicture}
+\caption{两种 transfer channel。$O_0$ 是上下边界直接重叠，$O_A$ 在中间夹一行
+PEPS。$q$ 是每个横向 unit cell 的行商；数值上分别求左右主固定点，再检查两侧 joint 方程。}
+\label{fig:two-channels}
+\end{figure}
+
+\subsection{外层优化与内层环境响应}
+
+固定 $\chi$ 后，所有允许的边界参数组成向量 $a$。模型方向约束写为
+$R=\mathrm{move}(a)$、$S=\mathrm{native}(a)$，但这只是参数化关系，
+不是把 transfer matrix 假设为 Hermitian。每个 trial 参数都要重新解
+cap 和左右环境；对 cap 方程 $M x=\mu x$ 的响应通过增广系统
+\begin{equation}
+ \begin{pmatrix}M-\mu I&-x\\x^\dagger&0\end{pmatrix}
+ \begin{pmatrix}dx\\d\mu\end{pmatrix}
+ =\begin{pmatrix}-(dM)x\\0\end{pmatrix}
+\end{equation}
+求出。外层以完整 residual 的解析 Jacobian $J$ 做信赖域最小二乘：
+\begin{equation}
+ \delta=\arg\min_{\|\delta\|\leq\Delta}\|F+J\delta\|^2,
+ \qquad a_{\rm trial}=(a+Q\delta)(I+\delta^\dagger\delta)^{-1/2}.
+\end{equation}
+只有实际舍入候选的 merit gain 为正、独立有限差分通过、并且更新后的完整
+joint residual 可计算时才接受；奇异方向不做截断。这里“内层收敛”指 cap/
+响应线性问题收敛，“外层收敛”指双边 joint residual 过 $10^{-9}$，二者不等价。
+
+\subsection{bare/direct 如何收缩三分区域}
+
+环境通过后，三分区域的 $G$ 和 $B$ 不是另一个 VUMPS 近似：它们是固定边界
+channel 的直接 leading fixed point：
+\begin{equation}
+ G=\operatorname{fp}\bigl(\text{top}\,|\,\text{bottom}\bigr),\quad
+ B=\operatorname{fp}\bigl(\text{top}\,|\,A\,|\,\text{bottom}\bigr),\quad
+ H_A=BG^{-1},\quad H_B=(G^{-1}\otimes I_{\rm phys})B.
+\end{equation}
+$G$ 是 two-column overlap，$B$ 是中间夹一个实际 PEPS tensor 的
+three-column overlap；direct 方法不使用 grown tail 或 endpoint map。
+三条区域边界由 $G,H_A,H_B$ 拼成带方向的 AB、AC、BC seams，
+每个 seam 再用自己的 cap 做有限深度传播。replica 闭合时保留所有
+fermionic parity sector 和有向指标，最后才做带符号的复数求和。
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[x=1cm,y=.78cm,>=Latex,
+  t/.style={draw,rounded corners,fill=blue!10,minimum width=.9cm,minimum height=.5cm},
+  g/.style={draw,fill=purple!15,minimum width=1.0cm,minimum height=.62cm},
+  h/.style={draw,fill=orange!18,minimum width=1.05cm,minimum height=.62cm},
+  p/.style={draw,fill=green!15,minimum width=.62cm,minimum height=.62cm}]
+  \node[t] (t1) at (0,1.35) {top};\node[t] (t2) at (1.45,1.35) {top};\node[t] (t3) at (2.9,1.35) {top};
+  \node[t] (b1) at (0,-1.35) {bottom};\node[t] (b2) at (1.45,-1.35) {bottom};\node[t] (b3) at (2.9,-1.35) {bottom};
+  \node[g] (g) at (1.45,0.28) {$G$};
+  \node[h] (ha) at (0,0) {$H_A$};\node[h] (hb) at (2.9,0) {$H_B$};
+  \node[p] (a) at (1.45,-0.48) {$A$};
+  \draw[->] (t1)--(ha);\draw[->] (ha)--(b1);\draw[->] (t2)--(g);\draw[->] (g)--(a);\draw[->] (a)--(b2);\draw[->] (t3)--(hb);\draw[->] (hb)--(b3);
+  \node at (1.45,-2.05) {$G=LR,\quad B=LTR$};
+  \node at (1.45,2.05) {三列 bare 环境：无 grown tail、无 endmap};
+\end{tikzpicture}
+\caption{bare/direct 的局部收缩示意。中间的 $A$ 表示实际 PEPS tensor；
+$G$ 与 $B$ 先由直接 leading fixed point 得到，再形成 $H_A,H_B$，而不是用优化后的 tail 替代。}
+\label{fig:bare-direct}
+\end{figure}
+
+\subsection{fermionic replica 符号检查}
+
+每条 seam 的传播保留 endpoint 的复相位和正范数 log scale；不能在每步把
+复数投影成绝对值。$Z_2$ 的 character 表示只作浅层对照，$Z_4$ 的生产值使用
+完整 signed cycle sum。检查顺序是：浅层 full/character 相对误差、每个深度的
+复相位关系、endpoint residual、最后三档深度的长度漂移，最后才计算
+$\tS=\log Z_{2A}+\log Z_{2B}+\log Z_{2C}-\log Z_4-2\log Z_1$。
+因此一个漂亮的 $S$ 数字不能替代 joint 方程和符号门槛。
+
+\subsection{当前双边求解算法：方程与迭代方法的区别}
+\label{sec:current-pair-solver}
+
+本节说明 2026 年 9 月 18 日的实验实现。可称为\textbf{固定 $\chi$ 的双边
+VUMPS 驻点方程求解}；实际主算法是带模型方向约束的解析导数信赖域求根。
+双正交投影负责生成初态，固定目标 $\chi$ 后重新优化，最后另做物理与熵验收。
+逐条代码入口、作业号和可复制的 Slurm 提交命令见同目录
+\href{two_sided_solver.md}{\texttt{two\_sided\_solver.md}}。
+
+\paragraph{最新已完成结果与历史记录的区分。}
+下文保留早期扫描与方法演变。当前$\chi=4,8,12$均通过原方向、实际旋转方向的
+联合方程以及bare/direct收缩检查，熵分别为
+$0.4903883073$、$0.6366027957$、$0.7652622556$。
+另一个$\chi=6$、宇称扇区$(4,2)$驻点给出$0.5344557052$，
+相关检查通过，但两点RDM误差稍大于$\chi=4$，不并入上述三点的斜率拟合。
+$\chi=16$固定近似边界的$0.9114471196$仅为诊断熵：
+长度与相位通过，环境残差约$5.29\times10^{-5}$，尚未通过。
+这个熵只与同一分支的$\xi_{\rm MPS}=15.207702$、
+$\xi_{\rm pair}=70.589325$、$\xi_{\rm physical}^{N/F}=71.161584$对应，
+不能混用其它较小残差分支的关联长度。高精度续算中间记录不作为终态。
+完整表格见Markdown开头，作业进度和复现命令见实验README。
+
+\paragraph{新完成的原方向 $\chi=16$ 驻点。}
+作业11343802在7个接受步后达到原始完整联合残差
+$8.7391\times10^{-12}$。同一组保存的ComplexF64 canonical张量，
+不重新正则化而用128位原方程复评，残差为$4.7825\times10^{-13}$。
+该分支的$\xi_{\rm MPS}=5.9351838193$、$\xi_{\rm pair}=23.8104118804$，
+normal/anomalous的$\xi_{\rm physical}=24.3359837271$，
+connected density的$\xi_{nn}=4.9853374410$。
+三档模权重阈值$10^{-10},10^{-8},10^{-6}$均稳定，64个距离的模重构误差
+小于$10^{-13}$。这些长度略小于$\chi=12$；驻点收敛不证明物理精度随$\chi$
+改善。Gaussian对照给出两点RDM最大误差$3.92050\times10^{-5}$，
+略大于$\chi=12$的$3.63918\times10^{-5}$；积分网格漂移仅$6.16\times10^{-11}$。
+在$r=31$处normal绝对误差为$1.81232\times10^{-4}$，anomalous与connected
+density相对误差分别为$5.83454\%$、$41.3901\%$。
+实际旋转模型求解尚待完成，没有新bare熵，
+尤其不能配用上文旧分支的$0.9114471196$。
+
+本次求解使用\path{benchmark/selected_precision_weighted_trust.jl}。
+每轮从完整Float64响应矩阵开始，在软方向逐步以128位响应修正，
+始终保留全部128个参数方向。实际步相对新算128位响应的误差须小于$10^{-8}$，
+否则修正数从16增至32、64或全部；末步16和32均失败，64才通过。
+原两档四阶差分、实际舍入候选的真实下降和完整联合残差门槛保持不变。
+这不是截断小奇异值，也没有改变目标$\chi$。实际旋转模型采用自己的
+PEPS和检查点，通过显式模型方向入口另行审计、求解。
+
+\paragraph{$\chi=24$ 初态的例外。}
+从新收敛$\chi=16$做双边长行和混合度量谱投影时，原切口检查未通过。
+目标切口两侧本征值约为$-8.44\times10^{-9}$、$-3.77\times10^{-9}$；
+局部相对间隔虽约为0.553，但相对$10^{-12}$的输入扰动使投影变化约
+$0.12\%$--$0.45\%$，超过预设$10^{-3}$门槛。
+纯对角相似变换平衡没有使原坐标下的相同扰动通过。
+这是初态谱截断的稳定性问题，并非已经证明$\chi=24$优化失败。
+
+另一个隔离初值将$\chi=16$按宇称等距嵌入$\chi=24$的$(12,12)$虚空间，
+只在旧虚空间块外加$10^{-3}$扰动，然后规范化并重建上下关系。
+\textbf{它不是双正交谱截断}；后续仍须在目标$\chi=24$参数空间求解原双边方程。
+作业11345054保存初态的两侧每格fidelity均约为0.9999997254，
+chart重建的fidelity误差小于$7\times10^{-14}$。
+初始joint为0.0239161、$\xi_{\rm pair}=37.3894$；这些只是零步快照，
+不是新收敛点，没有相应熵。较大的初始$\xi$也不证明物理精度改善。
+高精度响应与完整Jacobian检查使用自己的初态和检查点，
+入口控制仍与原$\chi=4$比较；命令见实验目录
+\path{wide_model_precision_submissions.json}。原符号收缩和最终门槛不变。
+
+\paragraph{实际旋转模型与大 $\chi$ 收缩的独立检查。}
+实际旋转$\chi=16$的完整128位Jacobian和自适应精度求解，前12个接受步的
+joint最大相对差为$1.30\times10^{-8}$，$\xi_{\rm pair}$最大绝对差为
+$1.78\times10^{-9}$，但两者终点joint仍约$5.97\times10^{-6}$，未过门槛。
+原方向通过不能代替实际旋转方向，也不能配用旧分支的熵。
+
+旧未收敛$\chi=24$环境在bare深度4还显示最终闭合的数值敏感性：
+冻结同一组四副本端点，仅换sliced边，单项复数结果最大相对差为
+$3.44\times10^{-7}$。将已算出的标量项改用128位求和后，full/character
+偏差仍约$5.68\times10^{-8}$，不能归因于最后标量累加。
+随机复数graded网络的26项直接/优化/sliced对照通过，但不能保证这些病态
+端点的精度。保持全部宇称和指标、逐项精确可逆的二进制成对缩放虽降低
+范数包络，仍未改善两种闭合结果，未加入生产bare路线。
+这些诊断使用旧未收敛环境，不能外推为新$\chi=24$或32收缩失败。
+
+\paragraph{二副本传播误差的高精度定位。}
+作业11346975在旧$\chi=24$、bare深度4的同一组Float64几何张量与cap上，
+逐元素精确提升后重算传播、正范数归一化及最终张量闭合。
+完整带符号表示与character表示的相对差在128/192位分别为
+$2.07620\times10^{-31}$与$5.26863\times10^{-51}$；两档精度的
+signed/character结果分别相差$7.89525\times10^{-32}$与$1.28715\times10^{-31}$。
+signed结果相对原Float64改变$2.52973\times10^{-9}$。
+只提升最后闭合精度时差异仍约$9.50\times10^{-10}$，因此这里定位到了
+传播/归一化的浮点误差。没有改变符号、环境、$G/B$、cap或验收门槛。
+这只验证二副本$Z_{2,C}$在深度4的数值；四副本高精度收缩尚未验证，
+旧环境仍未收敛，没有新增熵点。来源与独立十进制复算见实验目录
+\path{two_replica_propagation24_audit/local_verification.json}。
+
+\paragraph{$\chi=24$求解准备检查。}
+常规分区作业11346769完成全部288个参数方向的128位Jacobian/SVD，
+没有截断奇异方向。重构误差$1.73\times10^{-37}$，实际方向误差
+$1.04\times10^{-25}$，两档四阶差分误差$6.34\times10^{-8}$和$3.96\times10^{-9}$。
+只读候选降低加权目标，但完整joint暂时增大，不能视为收敛点。
+自己的自适应响应检查11346770已启动，后续求解仍需通过该检查。
+
+\paragraph{调度终止与检查点恢复。}
+\texttt{PREEMPTED}和\texttt{TIMEOUT}不是数值门槛失败。须先由
+\texttt{sacct}确认终态，并由整个\texttt{squeue}确认父作业退出。
+\path{restore_model_precise_checkpoint.jl}直接恢复八个canonical张量，
+要求零改动并复现记录的joint与$\xi$；恢复报告标为\texttt{snapshot\_only}，
+不是优化终态。续算使用原模型模板与恢复检查点，重新检查自己的响应和Jacobian。
+近期恢复链显式指定\texttt{--partition=htc}以覆盖脚本默认的抢占分区，
+精确命令见实验目录\path{regular_partition_recovery_submissions.json}。
+
+\paragraph{双边方程。}
+上下无限 MPS 记作 $R,S$，$\langle L|$ 由 $S$ 的空间边界 bra 构造，
+包含原有腿方向、共轭和费米子 twist。定义每格行本征值商
+\begin{equation}
+ q(R,S)=\lim_{n\to\infty}
+ \left[\frac{\langle L_n|T_n|R_n\rangle}
+ {\langle L_n|R_n\rangle}\right]^{1/n}
+ =\frac{\mu_T}{\mu_0}.
+\end{equation}
+这里 $\mu_T$ 是双方夹一行 PEPS 的水平混合通道主本征值，
+$\mu_0$ 是双方直接重叠通道的主本征值。环长 $n$ 仅用于解释定义；
+实际求无限通道固定点，没有构造有限环来代替环境。
+
+每次从当前整对边界重新计算 $l_T,r_T,l_0,r_0$。
+在混合正交形式 $A_C=A_LC=CA_R$ 下，两个方向分别要求
+\begin{equation}
+ H_{AC}(A_C)=z_{AC}N_{AC}(A_C),\qquad
+ H_C(C)=z_CN_C(C),\qquad z_{AC}=qz_C.
+\end{equation}
+$H$ 包含 PEPS 行，$N$ 是上下重叠的混合度量；双方各自规范化并不使
+混合度量自动等于单位阵。$AC$ 比 $C$ 多一个局部 PEPS 张量，故其本征值
+之间有 $q$ 因子。固定 $\chi$ 时这些是投影驻点条件，不是完整态空间内
+$TR-qR$ 必须严格消失。实现见
+\path{benchmark/selfconsistent_pair_core.jl}。
+
+\paragraph{当前使用的方向约束。}
+方程验收两个方向，但主求解器并非独立优化两套任意复数张量。
+它使用已对当前 $w=1$ 模型核查的上下方向关系，写为
+\begin{equation}
+ S=\mathrm{native}(a),\qquad R=\mathrm{move}(S),\qquad a^\dagger a=I.
+\end{equation}
+$a$ 位于固定中性物理支持的实数表示内；$\mathrm{move}$ 在已核查的
+mode 基中实施 $u=W^\dagger$ 的 Fock 变换，其中
+\begin{equation}
+ W=\begin{pmatrix}0&1\\-1&0\end{pmatrix}.
+\end{equation}
+这不表示行 transfer 是 Hermitian，也不能推广为任意非厄米模型的假设。
+旧 $\chi=8$ anchor 仅确定局域物理支持基，不限制目标 MPS 的虚键维度。
+目标虚空间内允许的实数参数全部优化，但实数、中性支持、方向关系和
+宇称空间仍是约束。约束梯度小不足以验收，必须重建双方并检查原始复数方程。
+原方向与实际旋转模型也分别求解；上下方向关系不是未经证明的 $90^\circ$
+环境变换。
+
+\paragraph{解析响应与信赖域迭代。}
+当前求 $f=\log q$ 的驻点。令 $Q$ 是 $a$ 的正交补，切向梯度为
+$g=Q^\dagger\nabla_a f$。环境响应由每个 cap 的 $Mx=\mu x$ 隐式求导：
+\begin{equation}
+ \begin{pmatrix}M-\mu I&-x\\x^\dagger&0\end{pmatrix}
+ \begin{pmatrix}dx\\d\mu\end{pmatrix}
+ =\begin{pmatrix}-(dM)x\\0\end{pmatrix}.
+\end{equation}
+因此更新张量时 cap 也参与求导。包括规范约束曲率项后得到 Hessian $K$，
+在信赖半径 $\Delta$ 内求
+\begin{equation}
+ \min_{\|\delta\|\leq\Delta}\|g+K\delta\|^2,\qquad
+ a_{\rm trial}=(a+Q\delta)(I+\delta^\dagger\delta)^{-1/2}.
+\end{equation}
+重新求 trial cap 和梯度，以实际与预测的梯度范数平方下降比决定接受，
+再检查完整联合残差。Hessian 谱不截断；解析导数另由实际标量 $\log q$
+的自适应差分核查。该求根方法不保证 $q$、联合残差或 $\xi$ 每步单调，
+也不是最大化 fidelity。内层 cap／响应问题收敛不能替代外层边界驻点收敛。
+实现为 \path{benchmark/analytic_joint_hessian.jl} 和
+\path{benchmark/analytic_dense_trust_adaptive.jl}。
+旧的逐边广义本征更新保留在 \path{benchmark/solve_selfconsistent_pair.jl}。
+
+\paragraph{接受范数的导数补充审计（9 月 18 日）。}
+上述 $K$ 是标量 $f$ 的 polar-chart Hessian，不自动等于实际接受范数的
+完整导数。令 $g_a=\nabla_a f$，实际残差及其响应为
+\begin{equation}
+ F=(I-aa^\dagger)g_a,\qquad
+ dF=(I-aa^\dagger)dg_a-da(a^\dagger g_a)-a(da^\dagger g_a).
+\end{equation}
+对 $da=QV$，真实水平响应含 $-V(a^\dagger g_a)$，而标量 Hessian 使用
+$-V\operatorname{sym}(a^\dagger g_a)$。在 $\chi=6$ 的停滞点，有限差分
+确认两者不同；最后被拒绝的小步，旧预测为 $-6.95\times10^{-9}$，实际
+导数为 $+4.18\times10^{-9}$，自适应 Richardson 核查误差约
+$1.32\times10^{-15}$。该事实不否定原标量 Hessian 的对称性检查。
+
+独立脚本 \path{benchmark/projected_merit_trust.jl} 因此对实际 $F$ 的矩形
+Jacobian $J$ 求 $\min_{\|\delta\|\leq\Delta}\|F+J\delta\|^2$，保留全部奇异
+方向和原完整联合验收。$\chi=4$ 控制达到 $1.20\times10^{-14}$，但
+$\chi=6$ 仍停在 $1.34\times10^{-3}$；此修正没有单独解决后者，也不能
+解释全部历史停滞。原算法保留；$\chi=16$ 从同一端点比较到第 40 步，原方法与修正方法的
+联合残差分别为 $1.64046\times10^{-3}$ 和 $1.64839\times10^{-3}$，未见明显加速。
+已通过独立联合方程验收的 $\chi=8,12$ 结果不因此自动失效。
+
+另用完整实数 Stiefel 切空间（含 $QV$ 和 $aK$，$K$ 为实反对称矩阵）
+及残差 $g_a-a\operatorname{sym}(a^\dagger g_a)$ 作独立小 $\chi$ 控制。
+保留规范冗余并核查解析响应后，$\chi=4$ 达到 $1.20\times10^{-14}$，
+但 $\chi=6$ 仍停在联合残差 $1.44\times10^{-3}$，不能据此宣称已解决停滞。
+
+\paragraph{双正交投影只生成初态。}
+上下边界各吸收实际一行 PEPS 后，以双方增长张量构造混合度量。
+若有 $m$ 个简并主模，则保留完整孤立主空间，以
+$\Tr(r_j\ell_i)=\delta_{ij}$ 归一，使用
+\begin{equation}
+ D_N=\frac1m\sum_i r_i\ell_i,\qquad
+ D_{S,\mathrm{bra}}=\frac1m\sum_i\ell_i r_i.
+\end{equation}
+这些量不假设为正定厄米矩阵。保留的左右 Schur 子空间 $V,U$ 给出
+$J=(U^\dagger V)^{-1}U^\dagger$、$JV=I$、斜投影 $P=VJ$。
+检查条件数、投影恒等式和谱分离，不切开未分辨的简并或共轭本征对。
+这不是声称 SVD 奇异值有复共轭配对。
+
+当前初态路线先投影至 $2\chi_{\rm target}$，中间投影两个宇称扇区等额保留；
+再用已核查的交换代数与奇虚规范等价性拆分两份 graded 副本。
+拆分后的宇称多重度由分解得出；$4\to6$ 为 $(3,3)$，$4\to8$ 为 $(4,4)$。
+配对按双方与父态 fidelity 的乘积选择。此后在目标 $\chi$ 重新求解全部
+允许参数，父态不再固定。实现为 \path{benchmark/upward_block_seed.jl}。
+
+\textbf{目前没有直接优化 $\xi_{\rm pair}$。}
+截断的混合度量谱与求 $\xi_{\rm pair}$ 的 transfer 谱不同，算法不保证
+该关联长度随 $\chi$ 单调，也不保证仅靠度量截断就保留所有慢模。
+
+\paragraph{验收与当前状态。}
+联合残差取双方 AC/C 原始及去度量残差、中心本征值关系、方向行商一致性
+的最大值，门槛为 $10^{-9}$。另外检查 cap 残差、主模间隙、度量条件数和
+逆作用。通过后仍须核对 Gaussian RDM、带复相位的关联函数与物理衰减模，
+再用独立旋转环境做 bare/direct 的符号、相位及长度检查。
+优化时吸收 PEPS 行不改变熵的定义：仍为两列 $G$、三列 $B$、$H=BG^{-1}$，
+不采用 grown-tail 或 endmap。
+
+中间 $\chi=6,8,12,16,24$ 已按统一主算法扫描，但五个初次端点均未通过
+联合门槛。另由 $\chi=4$ 双边增长后精修的 $\chi=8$，job 11316040，得到
+\begin{equation}
+ \epsilon_{\rm joint}=5.2717177477\times10^{-10},\qquad
+ \xi_{\rm pair}=10.8218030113.
+\end{equation}
+这是新的驻点记录，与旧 $\xi_{\rm pair}\simeq241.34$ 的 $\chi=8$ 点分开。
+当前已核对源文件 SHA 与最终保存态残差。实际旋转环境续跑 job 11316154
+也已通过联合门槛，残差 $4.89935\times10^{-10}$，
+$\xi_{\rm pair}=10.8218030043$。原方向物理模式核查 job 11316153 完成，
+normal/anomalous 衰减长度为 $11.3474822773$，density 为 $2.3482498890$，
+对所测 residue cutoff 稳定；这不代替 Gaussian 精度比较。
+最终态 Gaussian 测量完成：两点 RDM 最大元误差 $1.59502\times10^{-4}$；
+$r=7$ 的 anomalous 相对误差约 $1.63\%$，理论为零的 normal 实测幅度
+$1.26142\times10^{-3}$。小残差不单独证明物理分支正确。
+
+后续 bare/direct job 11316162 已通过 signed 对照、相位、端点与长度检查，得到
+\begin{equation}
+ \widetilde S_{\chi=8}=0.6366027956792,\qquad
+ \xi_{\rm MPS}=2.6764831294.
+\end{equation}
+长度漂移 $6.99\times10^{-11}$，最终相位误差 $1.14\times10^{-10}$，
+端点残差 $1.86\times10^{-13}$。这是该有限 $\chi$ 联合边界的 bare 结果，
+仍不代表无限 $\chi$ 的物理熵已认证。
+
+$\chi=12$ 后续原方向／实际旋转方向联合残差分别达到
+$7.88\times10^{-12}$、$7.96\times10^{-12}$，bare job 11316385 也通过。
+当前该新分支为
+\begin{center}
+\begin{tabular}{rrrr}
+\toprule
+$\chi$ & $\xi_{\rm MPS}$ & $\xi_{\rm pair}$ & bare $\widetilde S$\\
+\midrule
+4 & 1.1708770101 & 4.2618928289 & 0.4903883073404\\
+8 & 2.6764831294 & 10.8218030113 & 0.6366027956792\\
+12 & 6.1002248428 & 25.4980754180 & 0.7652622555597\\
+\bottomrule
+\end{tabular}
+\end{center}
+$\chi=12$ 的 bare 长度漂移 $2.92\times10^{-10}$，最终相位误差
+$1.23\times10^{-10}$，两点 RDM Gaussian 最大元误差 $3.64\times10^{-5}$。
+normal/anomalous 物理衰减 $\xi=26.03172382$，density 为 $5.16526142$，
+均对所测 residue cutoff 稳定。一般有限 $\chi$ MPS 不必保持 Wick 关系，
+其偏差作为诊断记录，不能单独替代物理验收。
+
+同一组熵对 $\ln\xi$ 的相邻割线如下：
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+关联长度定义 & $\chi:4\to8$ & $\chi:8\to12$\\
+\midrule
+单边 MPS & 0.17685 & 0.15617\\
+双边 pair & 0.15691 & 0.15012\\
+单粒子物理通道 & 0.16946 & 0.15495\\
+密度物理通道 & 0.16960 & 0.16321\\
+\bottomrule
+\end{tabular}
+\end{center}
+Gaussian 既有每结点 $\ln L$ 系数约 $0.1550$--$0.1553$；三个小 $\chi$
+点不足以认证渐近相等，不按斜率是否接近 Gaussian 选择关联长度定义。
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{../../code2d/fpeps/data/direct_chi_curve/joint_bare_smallchi.pdf}
+\caption{新联合分支的三个有限 $\chi$ bare 点与不同关联长度。线段仅连接
+数据，不代表渐近拟合。联合残差与收缩检查通过，物理精度仍随 $\chi$ 核查。}
+\end{figure}
+从通过验收的 $\chi=12$ 生成的 $\chi=16$ 新初态，首段 60 步求解
+（11316591）仍失败：末态联合残差 $0.12649$，梯度约 $8.36\times10^{-5}$，
+混合度量条件数约 $1.42\times10^6$。它说明梯度下降不能替代完整方程
+验收；该端点不用于 bare 熵测量。其他初态续算与中间 $\chi$ 试验另行保留。
+\paragraph{直接优化完整 AC/C 残差的隔离试验（2026-09-18）。}
+旧方法沿 $\chi=8$ 初态继续到累计 320 步，联合残差仍为
+$2.03001\times10^{-4}$，$\xi_{\rm pair}=23.83058$。
+新增方法在相同的模型方向约束参数空间中，优化双方 $X=AC,C$ 的残差
+\begin{equation}
+ f_X=\frac{N_X^{-1}(H_XX)/z_X-X}{\|X\|},\qquad
+ z_X=\frac{\langle N_XX,H_XX\rangle}{\langle N_XX,N_XX\rangle},
+\end{equation}
+并加入 $z_{AC}=qz_C$ 与两侧行商一致性残差。
+中心 $C=\sqrt{\rho}$ 取自通道正密度的正平方根，响应由
+$C\,dC+dC\,C=d\rho$ 给出；$AC$、$AR$、全部 cap 及逆度量均参与求导。
+完整 Jacobian 的信赖域步按真实残差下降接受，最终仍以原复数
+\texttt{joint\_audit} 的 $10^{-9}$ 门槛验收。这是新的残差求解试验，
+不能称作已经收敛的标准双边 VUMPS。
+
+$\chi=4$ 的 $10^{-3}$ 切向扰动控制两步恢复到联合残差
+$5.31\times10^{-11}$。$\chi=16$ 从旧方法第 200 步 checkpoint 出发，
+40 步后联合残差降到 $5.80173\times10^{-5}$，
+$\xi_{\rm pair}=23.89812$，尚未通过验收；没有新的 bare 熵值。
+该端点的物理测量另行提交，不能沿用旧端点的 Gaussian 误差。
+平衡奇偶扇区的 $\chi=6$ 新试验停于联合残差 $3.92\times10^{-4}$。
+
+某些 $\chi=16$ 更新方向在过小差分步长下误差反而增加，较宽步长审计已经通过：相邻两档 Richardson 误差为
+$1.75\times10^{-6}$ 和 $3.90\times10^{-6}$。另建隔离试验：当原线性一致性检查不通过时，必须有实际方向
+连续两档 Richardson 检查同时支持组装 Jacobian 与直接方向响应，才允许
+接受较大步长。它明确改变内部更新检查，不能宣称原检查通过；最终联合
+残差、cap 唯一性和逆作用门槛均不改变。提交命令和源 SHA 见 Markdown note。
+
+\paragraph{完整响应基与中心因子的数值精度核查。}
+后续试验保留全部右奇异向量，在其正交基中重新计算解析响应。
+$\chi=4$ 扰动控制通过；$\chi=16$ 的40步终态为
+$\epsilon_{\rm joint}=5.93617\times10^{-7}$，
+$\xi_{\rm MPS}=5.93485$，$\xi_{\rm pair}=23.82446$。
+两点 RDM 的 Gaussian 最大元误差为 $3.92011\times10^{-5}$。
+该端点尚未通过 $10^{-9}$ 联合门槛，原始 $AC/C$ 残差也未通过，
+不能仅以逆度量放大为由认定收敛，没有新增 bare 熵点。
+
+独立检查另一个已完成的 $\chi=16$ FD 端点，发现最小 Schmidt 值约
+$4.11\times10^{-6}$。自密度 $\rho$ 的两种构造仅差
+$2.26\times10^{-15}$，但先对角化 $\rho$ 再开方重建 $AR$ 时，
+右等距误差为 $1.74\times10^{-7}$；直接采用 MPSKit 中心因子的 SVD
+正因子后，该误差为 $5.21\times10^{-12}$。这是新残差 cache 的数值
+精度问题，不能据此解释全部旧 VUMPS 失败。
+隔离修正保留全部奇异值，以未平方的中心奇异值构造 Sylvester 响应，
+并检查 $AR$ 等距误差小于 $10^{-9}$。$\chi=4$ 扰动控制通过，
+$\chi=16$ 一般方向导数通过，但实际更新方向的两档差分审计未通过，
+因此尚未启动该版本的 $\chi=16$ 求解。环境特征向量的迭代精修另行审计。
+原联合方程和 bare 检查门槛、已有通过结果均不改变。
+
+\paragraph{精修分支与驻点诊断（最新完成结果）。}
+以通过导数审计的 $\chi=12$ 增长初态启动精修求解，原方向停在
+$\epsilon_{\rm joint}=5.28538\times10^{-5}$、$\xi_{\rm pair}=70.58932$；
+实际旋转模型独立求解停在 $5.28560\times10^{-5}$、$70.58610$。
+两者均未通过。原方向 $\xi_{\rm MPS}=15.20770$，含 PEPS 柱的
+normal/anomalous 物理衰减长度为 $71.16158$，connected density 为
+$12.13482$。两点 RDM 的 Gaussian 最大元误差为 $1.37193\times10^{-4}$；
+$r=31$ 的 anomalous 相对误差为 $0.2571\%$，connected density 为
+$81.81\%$。不能仅凭较大的 $\xi$ 判定环境更准确，没有新增 bare 熵值。
+
+令 $F$ 是完整 $AC/C$ 规范化残差向量，$J$ 为切空间 Jacobian。
+该端点 $\|F\|=1.14304\times10^{-5}$、
+$\|J^{\mathsf T}F\|=1.35391\times10^{-10}$，但原始对数行商的水平梯度范数
+仍为 $0.05960768$，沿单位梯度方向的有限差分确认这一非零导数。
+因此残差平方和优化的停滞不等于原始商驻点，也不等于环境收敛；
+小 $\|J^{\mathsf T}F\|$ 本身不证明局部极小值。
+完整物理空间中，$AC$ 残差在 rank-2 支撑之外的范数约为
+$3.8\times10^{-14}$，远小于其总范数 $1.07\times10^{-5}$；
+主要残差不是该物理支撑遗漏造成的。$\chi=4$ 控制的原始商梯度约为
+$1.47\times10^{-10}$。后续从此 $\chi=16$ 端点重启原始商梯度路线，
+并继续已通过缩步长导数审计的 $\chi=6$ 试验；联合方程、旋转方向和
+bare 验收要求不改变。完整诊断和提交命令见 Markdown note 及计算日志。
+
+以下保留早期结果和失败尝试作为历史记录，具体最新输出见上述 Markdown note。
+
+
+\paragraph{未收敛环境上的 bare/direct 诊断（2026-09-18）。}
+进一步对上述精修原方向及独立实际旋转环境做完整带符号 direct 收缩，
+不使用 grown tail 或 endmap。深度 $d=256,512,1024$ 的诊断值分别为
+$0.9115819898,0.9114477391,0.9114471255$。
+最后一次相邻漂移为 $6.13674\times10^{-7}$，而最后三个深度中的最大
+相邻漂移仍为 $1.34251\times10^{-4}$，未通过 $10^{-7}$ 长度门槛。
+最终相位误差 $3.23965\times10^{-9}$ 通过 $10^{-8}$ 检查，端点残差为
+$8.54686\times10^{-11}$。环境联合残差仍约 $5.3\times10^{-5}$。
+因此 $0.9114471$ 仅为未收敛边界的有限深度诊断值，不能加入通过点或斜率拟合。
+$d$ 是无限边界上的收缩深度，不是有限物理系统大小。
+原目录新增诊断图，保留原通过点曲线。
+此端点完整宇称扇区 $\xi_{\rm MPS}=15.20770$，$\xi_{\rm pair}=70.58932$，
+normal/anomalous 物理衰减长度 $71.16158$；后端只取偶扇区的
+$\xi_{\rm boundary,even}=7.61087$ 不可与完整 $\xi_{\rm MPS}$ 混用。
+正式环境与熵验收要求不变，诊断入口及可复制提交命令见 Markdown note 与计算日志。
+
+
+\paragraph{延长 direct 收缩到 $d=4096$。}
+同一固定环境的 $d=2048,4096$ 诊断值分别为
+$0.911447119770$、$0.911447119579$。
+最后三档的最大相邻漂移为 $5.69980\times10^{-9}$，
+最终相位误差 $8.76556\times10^{-9}$，端点残差 $1.40009\times10^{-10}$。
+原生产长度、相位和端点检查现已通过；重叠深度与原扫描一致。
+这只更新上述 $d=1024$ 时的收缩结论，环境联合残差仍约
+$5.3\times10^{-5}$。因此 $0.9114471196$ 是该固定近似边界的稳定
+bare/direct 诊断值，仍不可加入环境通过点或拟合。诊断图已同步更新。
+
+进一步的隔离试验以直接中心因子 $C$ 对水平梯度残差加权：
+$F=(I-aa^\dagger)g$，$R=FC^{-1}$，导数保留
+$dR=dF\,C^{-1}+F\,d(C^{-1})$。所有 Schmidt 值保留，满秩时零点不变。
+这只是优化范数的条件调整，不是按双边关联长度截断。
+随机及实际方向的两档四阶差分在 $\chi=4,16$ 均通过，
+$\chi=4$ 的扰动恢复控制达到联合残差 $4.53241\times10^{-11}$。
+$\chi=16$ 新试验尚未完成，不能与上面的已测 direct 分支混配熵和关联长度。
+
+
+\paragraph{完整响应基续算终态及 Gaussian 初态对照。}
+加权20步终态之后再以完整响应基迭代40步，所有奇异方向保留，
+实际接受步均通过在线导数和真实 merit 检查，但终态联合残差仍为
+$5.14574\times10^{-4}$，$\xi_{\rm pair}=55.86733$，
+加权梯度范数为 $0.00856833$，后段明显停滞。
+原收敛图已加入这段续算；它没有新增 bare 熵，不能与前述
+$0.9114471196$ 所属的精修分支混配。
+
+对有限 $L=256$ Gaussian 拟合初态做零步快照及相同物理测量，得到
+联合残差 $2.54497\times10^{-3}$，$\xi_{\rm pair}=76.58528$，
+$\xi_{\rm MPS}=11.85895$，两点 RDM 最大元误差 $5.25981\times10^{-4}$。
+同一初态经20步标量优化后，联合残差为 $6.16033\times10^{-2}$，
+$\xi_{\rm pair}=18.70539$，$\xi_{\rm MPS}=4.99088$，
+两点 RDM 误差降至 $5.33160\times10^{-5}$。
+包含 PEPS 柱的 normal/anomalous 衰减长度分别为 $76.62000$ 与 $19.19661$。
+局域误差改善并不意味着环境联合方程收敛；大的关联长度本身也不认证精度。
+这两个端点都没有独立旋转求解和 bare 熵。
+前后关联函数图及原始作业、提交命令见 Markdown note 和计算日志。
+$\chi=6$ 加权试验也未通过，当前本路线通过联合方程、独立旋转与
+bare 检查的有限 $\chi$ 点仍为 $4,8,12$。
+
+
+\subsection{最新更新：χ16导数检查与χ6新驻点}
+χ16从χ8扩维的AC/C端点继续5步weighted求解后，完整联合残差从
+$5.93617\times10^{-7}$变为$1.57924\times10^{-6}$，
+$\xi_{\rm pair}=23.80965$，仍未达到$10^{-9}$。
+停止原因是导数检查，不能据此证明局部极小值。
+缩小差分步长使原随机方向通过，但实际更新方向的组装与fresh响应相对差
+$1.19723\times10^{-8}$仍超过$10^{-8}$，两档四阶差分要求也未通过。
+依赖续算未启动并已取消。两点RDM的Gaussian误差为$3.92187\times10^{-5}$。
+原目录的收敛图已补入这5步；$\widetilde S=0.9114471196$仍只属于前述
+另一对固定近似边界，其收缩检查通过而环境检查未通过。
+
+χ6新$(4\text{ even},2\text{ odd})$分支从已通过双边χ12投影得到初态，
+在目标χ6独立优化后，原方向与实际旋转方向分别8步达到联合残差
+$3.13511\times10^{-10}$与$3.13533\times10^{-10}$。
+$\xi_{\rm MPS}=1.1779819574$、$\xi_{\rm pair}=3.7197912081$、
+$\xi_{\rm physical}^{N/F}=4.2486792497$、$\xi_{nn}=1.5667834813$。
+短程RDM物理检查通过，但两点RDM的Gaussian误差$9.37354\times10^{-4}$
+稍大于χ4的$7.76806\times10^{-4}$，不能称为更准确的分支。
+完整带符号bare/direct作业11342433已提交，尚无该新χ6的熵。
+具体审计、作业和可复制提交命令保存在实验README的最新记录中。
+
+
+随后作业11342433已完成：χ6上述分支的bare/direct结果为
+$\widetilde S=0.5344557051926131$，长度漂移$2.55795\times10^{-12}$，
+深度256的相位误差$7.24909\times10^{-12}$，端点残差$1.81161\times10^{-13}$，
+完整带符号收缩通过。原生单边收敛标志不改写；本次双边joint另行检查并通过。
+物理精度仍未认证。该点在χ16诊断图中以独立空心菱形展示，不并入原4/8/12分支的斜率拟合。
+
+
+\subsection{128-bit精度检查与Gaussian续算}
+χ16五步weighted终态的完整128-bit Jacobian实际方向检查通过：
+组装/fresh相对差$1.74580\times10^{-22}$，两档四阶差分误差
+$6.47619\times10^{-9}$与$4.04766\times10^{-10}$。
+保留全部128个奇异方向，SVD重构误差$4.58\times10^{-38}$。
+这支持此前该方向受到Float64精度限制，并不证明所有失败都由精度造成。
+将最好χ16保存态的AL/AR/C/AC逐元素提升、保持波函数不变后，
+完整joint从$5.93617488432\times10^{-7}$变为$5.93617485555\times10^{-7}$。
+原始AC残差仍主导，环境尚未通过$10^{-9}$。
+只读步长测试中全步与四分之一步使weighted merit变差，十六分之一步才改善；
+精确导数仍不能消除非线性步长限制。
+
+隔离高精度求解器逐步核查实际方向，保存前将候选转回ComplexF64，
+再对实际舍入候选检查merit下降。最终完整joint门槛、边界格式和bare后端不变。
+χ4扰动控制11343214通过后，χ16续算11343215才会启动；
+其物理模及xi/RDM/Gaussian测量分别为依赖作业11343263/64。
+这些任务尚不构成新的χ16熵结果，提交命令保存在实验README。
+
+Gaussian有限环拟合追加500步后，loss从$1.27969178812\times10^{-7}$
+降至$1.27368096194\times10^{-7}$，梯度仍为$4.22498\times10^{-7}$。
+新态导入与符号检查通过；零步joint=$2.22958\times10^{-3}$，
+$\xi_{\rm MPS}=11.8685951781$，$\xi_{\rm pair}=64.5167962663$。
+$\xi_{\rm physical}^{N/F}=64.6014971278$对三个留数阈值稳定；
+密度长度在$10^{-10}$阈值下为$11.7900971213$，
+在$10^{-8}$与$10^{-6}$下为$4.0532066637$，有明显阈值依赖。
+两点RDM的Gaussian误差由$5.25981\times10^{-4}$增至$5.70563\times10^{-4}$。
+该分支没有bare熵，不与其它分支的熵混配。
+
+
+\subsection{最新计算状态与可复现提交顺序（2026-09-18）}
+
+\paragraph{旋转方向的 $\chi=16$ 续算。}
+实际旋转 PEPS 必须独立求解，不能用原方向的环境代替。前一条 v3 续算在
+20 个接受步后正常结束，完整联合残差由
+$5.0476826714\times10^{-6}$降到$2.2150587419\times10^{-6}$，
+$\xi_{\rm pair}=23.8250794145$。同一保存态的128位只读复核给出
+$2.2150587412\times10^{-6}$，所以这不是 Float64 评估误差。
+完整谱测量给出
+$\xi_{\rm MPS}^{N}=5.9353250743$、
+$\xi_{\rm MPS}^{S}=5.9353250743$、
+$\xi_{\rm pair}=23.8250794145$；偶、奇两个宇称扇区都检查，
+最大反向谱误差小于$8\times10^{-16}$。该边界仍未通过$10^{-9}$联合门槛，
+这些长度不能和旧未收敛分支的$\widetilde S$配对。
+
+从该保存态出发的 v4 续算使用完全相同的方程、128位响应修正、
+实际有限差分和正 merit gain 检查，只把迭代上限从20提高到60。
+当前已接受5步，联合残差为$1.6521817495\times10^{-6}$、
+$\xi_{\rm pair}=23.8134212407$；仍不是熵验收点。
+
+\paragraph{$\chi=24$ 的导数审计与求解失败。}
+嵌入初态的完整128位 Jacobian 有288个参数方向，全部奇异值保留，
+SVD重构误差为$1.73\times10^{-37}$。实际方向组装误差为
+$1.04\times10^{-25}$，两档四阶差分误差为
+$6.34\times10^{-8}$和$3.96\times10^{-9}$。自适应响应审计只把8个方向提升到128位，
+相对于完整矩阵的更新作用误差为$2.23\times10^{-11}$，检查通过。
+这些都是只读候选检查，不是优化终态。
+
+随后原始20步求解从$\widetilde S$的零步初态
+$\mathrm{joint}=0.0239161408$开始，接受到第3步时为
+$0.0119709884$；下一次重建平衡中心因子时出现
+`factor\_center` 求逆失败。该作业已确认是数值路径失败，
+没有生成可接受的边界或熵。失败不是 replica 符号门槛，也不能说明$\chi=24$
+方程没有解。已另建只改变初始 trust radius 的隔离脚本，
+把$0.05\sqrt{\chi}$改为$0.0125\sqrt{\chi}$，其余方程、响应、
+merit、符号和最终联合门槛完全不变。
+
+\paragraph{另一条 $\chi=12\to16$ 初态支路。}
+旧的 $\chi=12\to16$ 分支初态联合残差为
+$5.2853820450\times10^{-5}$、$\xi_{\rm pair}=70.5893249470$。
+它自己的两方向128位导数检查、完整128方向 Jacobian 和自适应响应审计均通过；
+全步候选使加权范数变差，四分之一步和十六分之一步才改善，
+因此仍须由信赖域优化器继续求解，不能把只读候选当作新终态。
+
+\paragraph{提交接口。}
+所有宽版求解器的参数顺序必须严格为
+\begin{verbatim}
+SOURCE OUTPUT FULL_J_AUDIT CHECKPOINT MAXITER INITIAL_NOISE
+       CACHE_AUDIT SELECTED_RESPONSE_AUDIT MODEL
+\end{verbatim}
+例如，使用已通过审计的$\chi=24$初态时：
+\begin{verbatim}
+sbatch --clusters=htc --partition=htc --time=04:00:00 --mem=32G \\
+  jobs/run_cpu.sh --compiled-modules=existing --pkgimages=existing \\
+  benchmark/wide_model_selected_precision_smallradius.jl \\
+  NATIVE_SEED OUTPUT FULL_J_AUDIT INITIAL_PAIR.jls 20 0 \\
+  CACHE_AUDIT SELECTED_RESPONSE_AUDIT native
+\end{verbatim}
+把 audit 或 checkpoint 路径放到$\texttt{MAXITER}$位置会在进入数值前触发
+参数解析错误；这类调度失败不应被记录为物理或 VUMPS 失败。
+
+\paragraph{当前熵验收规则。}
+只有原方向和实际旋转方向都满足完整联合残差$<10^{-9}$，保存态的
+128位复核也通过，并且 bare/direct 的完整费米子 signed cycle、character 浅层审计、
+相位、端点和长度门槛全部通过，才写入$\widetilde S$。bare 测量固定使用
+$G=LR$、$B=LTR$、$H_A=BG^{-1}$和$H_B=(G^{-1}\otimes\text{physical})B$；
+不使用 grown tail 或 endmap。有限$\chi$验收仍不等于无限$\chi$物理精度认证。
