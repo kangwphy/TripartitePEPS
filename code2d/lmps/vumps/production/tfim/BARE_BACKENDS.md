@@ -50,7 +50,8 @@ implementations and rerun parity tests after changing replica wiring or
 normalization. Exact one-bond slicing reduces memory use but still grows
 rapidly at high chi. No automatic reduction in chi is performed.
 
-Tests: `test/bare_driver_smoke.jl` with TFIM_BACKEND=cpu/cuda;
+Tests: `test/bare_driver_physical.jl` with TFIM_BACKEND=cpu/cuda,
+TFIM_TEST_SOURCE, TFIM_TEST_OUTPUT and optional TFIM_TEST_CHI (default 4);
 `test/bare_cuda_regression.jl` for complex contraction parity; and
 `test/bare_cuda_bridge.jl` with TFIM_CUDA_BRIDGE_INPUT pointing to saved
 physical boundary trial files. Run all tests in Slurm compute allocations.
