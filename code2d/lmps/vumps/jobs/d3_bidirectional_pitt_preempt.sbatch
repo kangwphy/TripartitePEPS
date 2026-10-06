@@ -15,7 +15,7 @@
 set -euo pipefail
 [[ "${SLURM_JOB_PARTITION:-}" == preempt ]] || { echo 'Pitt requires preempt' >&2; exit 2; }
 export CHAIN_PACKAGE=${CHAIN_PACKAGE:-/ix/zdai/kangw/PEPS3EE/PEPS/worktrees/tfim-bidirectional-20261006/code2d/lmps/vumps}
-export CHAIN_CAMPAIGN_ROOT=${CHAIN_CAMPAIGN_ROOT:-/ix/zdai/kangw/PEPS3EE/PEPS/clean/data/tfim/store/campaigns/qr_bidirectional_20261006/D3}
+export CHAIN_CAMPAIGN_ROOT=${CHAIN_CAMPAIGN_ROOT:-/ix/zdai/kangw/PEPS3EE/PEPS/clean/data/tfim/store/campaigns/qr_bidirectional_fresh_20261006/D3}
 export JULIA_EXE=${JULIA_EXE:-/ihome/zdai/kaw593/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/bin/julia}
 export JULIA_DEPOT_PATH=${JULIA_DEPOT_PATH:-/ix/zdai/kangw/PEPS3EE/.julia_depot_vumps_gpu:/ix/zdai/kangw/PEPS3EE/.julia_depot:/ix/zdai/kangw/PEPS3EE/.julia_depot_vumps_cpu:/ihome/zdai/kaw593/.julia}
 export CHAIN_SLURM_CLUSTER=gpu

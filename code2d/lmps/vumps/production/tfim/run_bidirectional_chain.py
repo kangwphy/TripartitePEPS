@@ -88,6 +88,32 @@ def last_csv(path):
     return rows[-1]
 
 
+def validate_fresh_seed(seed, specification, plan):
+    if not true(specification.get('fresh')):
+        raise RuntimeError('This campaign requires a freshly constructed endpoint seed')
+    forbidden = {'checkpoint_path', 'historical_branch', 'sha256', 'source_h'}
+    if forbidden.intersection(specification) or any(k.startswith('old_') for k in specification):
+        raise RuntimeError('Historical checkpoint provenance is forbidden for fresh endpoint seeds')
+    marker = Path(str(seed) + '.json')
+    recipe = json.loads(marker.read_text())
+    expected = dict(branch=specification['branch'], h=float(specification['h']),
+                    D=int(plan['D']), epsilon=float(specification['epsilon']),
+                    seed=int(specification['random_seed']))
+    actual = recipe.get('recipe', recipe)
+    if (actual.get('type') != 'product_plus_c4v_noise'
+            or actual.get('source') != 'generated_from_scratch'
+            or actual.get('campaign') != plan['campaign']
+            or recipe.get('uses_old_checkpoint') is not False):
+        raise RuntimeError('Seed recipe does not certify construction from scratch')
+    for key, value in expected.items():
+        if actual.get(key) != value:
+            raise RuntimeError('Fresh seed recipe mismatch: ' + key)
+    source_sha = sha(seed)
+    if source_sha != recipe.get('checkpoint_sha256'):
+        raise RuntimeError('Fresh seed file SHA mismatch')
+    return source_sha, recipe
+
+
 def validate_result(point, h, direction, source_sha, code_sha, plan):
     r = json.loads((point / 'point_result.json').read_text())
     checks = [true(r.get('terminal')), int(r['D']) == int(plan['D']),
@@ -182,13 +208,14 @@ def main():
         print(code_sha)
         return 0
     if not all((args.plan, args.root, args.direction, args.seed)):
-        ap.error('--plan, --root, --direction and --seed are required')
+        ap.error('--plan, --root, --direction and fresh output --seed are required')
     if not os.environ.get('SLURM_JOB_ID'):
         raise RuntimeError('Numerical chain execution requires a real Slurm allocation')
     plan = json.loads(args.plan.read_text())
     root = args.root.resolve()
-    if root.name != 'D' + str(plan['D']) or 'qr_bidirectional_20261006' not in root.parts:
-        raise RuntimeError('Output must be a separate qr_bidirectional_20261006/D# campaign')
+    if (root.name != 'D' + str(plan['D']) or root.parent.name != plan['campaign']
+            or not plan['campaign'].startswith('qr_bidirectional_fresh_')):
+        raise RuntimeError('Output must be the separate fresh campaign/D# in the plan')
     if os.environ.get('TFIM_EXPECTED_CODE_SHA256', code_sha) != code_sha:
         raise RuntimeError('Deployed source fingerprint differs from expected code')
     branch = root / args.direction
@@ -196,22 +223,45 @@ def main():
     lock = (branch / 'controller.lock').open('a+')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     seed = args.seed.resolve()
-    source_sha = plan['seeds'][args.direction]['sha256']
-    if sha(seed) != source_sha:
-        raise RuntimeError('Seed SHA mismatch')
+    if os.path.commonpath((str(seed), str(root.parent))) != str(root.parent):
+        raise RuntimeError('Fresh seed output must be inside this new campaign')
+    seed_spec = plan['seeds'][args.direction]
+    if not true(seed_spec.get('fresh')) or any(k in seed_spec for k in ('checkpoint_path', 'historical_branch', 'sha256', 'source_h')):
+        raise RuntimeError('Only a from-scratch seed specification is allowed')
+    if abs(float(seed_spec['h']) - float(plan['directions'][args.direction][0])) > 1e-12:
+        raise RuntimeError('Fresh endpoint h must equal first scan point')
+    runner = Runner(time.time() + args.wall_seconds)
+    julia = [args.julia, '-O3', '--startup-file=no', '--compiled-modules=existing',
+             '--project=' + str(package)]
+    seed.parent.mkdir(parents=True, exist_ok=True)
+    if not seed.exists() and not Path(str(seed) + '.json').exists():
+        command = julia + [str(package / 'production/tfim/make_bidirectional_seed.jl'),
+                           '--branch', seed_spec['branch'], '--output', str(seed),
+                           '--h', str(seed_spec['h']), '--seed', str(seed_spec['random_seed']),
+                           '--epsilon', str(seed_spec['epsilon'])]
+        seed_env = os.environ.copy()
+        for key in ('TFIM_SOURCE_STATE', 'TFIM_SOURCE_SHA256', 'TFIM_SOURCE_H'):
+            seed_env.pop(key, None)
+        code = runner.run(command, seed_env, branch / 'fresh_seed_generation.log',
+                          branch / 'seed_generation_stop')
+        if runner.stop_signal:
+            return runner.exit_code()
+        if code != 0:
+            raise RuntimeError('Fresh seed generation failed with exit ' + str(code))
+    source_sha, seed_recipe = validate_fresh_seed(seed, seed_spec, plan)
+    if seed_recipe.get('script_sha256') != sha(package / 'production/tfim/make_bidirectional_seed.jl'):
+        raise RuntimeError('Fresh seed generator version differs from pinned source')
     config = dict(plan=plan, direction=args.direction, seed_path=str(seed),
                   seed_sha256=source_sha, code_sha256=code_sha,
+                  seed_recipe=seed_recipe,
                   code_revision=os.environ.get('TFIM_CODE_REVISION', 'unspecified'))
     immutable_json(branch / 'scan_config.json', config)
     immutable_json(branch / 'source_manifest.json', dict(code_sha256=code_sha, files=files))
-    runner = Runner(time.time() + args.wall_seconds)
     source = seed
     results = []
     pending = []
     job = os.environ['SLURM_JOB_ID']
     pilot_path = branch / 'pilot_validation.json'
-    julia = [args.julia, '-O3', '--startup-file=no', '--compiled-modules=existing',
-             '--project=' + str(package)]
     driver = package / 'production/tfim/run_gs_qr_bidirectional_point.jl'
     measurement = package / 'production/tfim/measure_bidirectional_point.jl'
     for index, field in enumerate(plan['directions'][args.direction]):
@@ -224,16 +274,16 @@ def main():
         immutable_json(point / 'input_provenance.json', dict(
             D=plan['D'], h=h, chi_opt=plan['chi_opt'], direction=args.direction,
             source_checkpoint=str(source), source_sha256=source_sha,
-            parent_h=parent['h'] if parent else plan['seeds'][args.direction]['source_h'],
+            parent_h=parent['h'] if parent else seed_spec['h'],
             parent_converged=parent['converged'] if parent else None,
-            parent_stopping_reason=parent['stopping_reason'] if parent else 'historical_seed',
+            parent_stopping_reason=parent['stopping_reason'] if parent else 'fresh_product_plus_c4v_noise',
             code_sha256=code_sha))
         env = os.environ.copy()
         env.update(TFIM_SOURCE_STATE=str(source), TFIM_SOURCE_SHA256=source_sha,
                    TFIM_POINT_ROOT=str(point), TFIM_H='%.8f' % h, TFIM_BRANCH=args.direction,
                    TFIM_D=str(plan['D']), TFIM_CTM_CHI=str(plan['chi_opt']),
                    TFIM_AD_TOLERANCE=str(plan['ad_tolerance']),
-                   TFIM_SOURCE_H=str(parent['h'] if parent else plan['seeds'][args.direction]['source_h']),
+                   TFIM_SOURCE_H=str(parent['h'] if parent else seed_spec['h']),
                    TFIM_BASE_GIT_COMMIT=plan['base_commit'],
                    TFIM_MAX_STEPS=str(plan['max_steps_per_point']), TFIM_CODE_SHA256=code_sha,
                    TFIM_STOP_FILE=str(point / 'stop_after_step'))
