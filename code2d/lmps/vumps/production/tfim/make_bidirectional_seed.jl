@@ -103,7 +103,7 @@ function make_bidirectional_seed(options)
     symmetrized = PEPSKit.symmetrize!(deepcopy(peps), PEPSKit.RotateReflect())
     symmetry_error = norm(symmetrized[1,1] - peps[1,1]) / norm(peps[1,1])
     abs(actual_noise_relative - epsilon) <= 1e-14 && product_noise_overlap <= 1e-12 && symmetry_error <= 1e-12 || error("Seed recipe checks failed")
-    dense = Array(peps[1,1])
+    dense = convert(Array, peps[1,1])
     size(dense) == (2,D,D,D,D) && eltype(dense) == ComplexF64 || error("Unexpected dense seed tensor layout")
     singular_min, singular_max, virtual_condition = Float64[], Float64[], Float64[]
     for virtual_axis in 2:5
