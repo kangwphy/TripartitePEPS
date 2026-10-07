@@ -114,16 +114,23 @@ def validate_fresh_seed(seed, specification, plan):
     return source_sha, recipe
 
 
-def validate_result(point, h, direction, source_sha, code_sha, plan):
+def validate_result(point, h, direction, source_sha, code_sha, plan, backend='cuda'):
     r = json.loads((point / 'point_result.json').read_text())
     checks = [true(r.get('terminal')), int(r['D']) == int(plan['D']),
               int(r['ctm_chi']) == int(plan['chi_opt']),
               abs(float(r['h']) - h) < 1e-10, r['branch'] == direction,
               r['source_sha256'] == source_sha, r['code_sha256'] == code_sha,
-              true(r.get('cpu_gpu_agreement')), true(r.get('ctm_converged')),
+              true(r.get('ctm_converged')),
               0 <= int(r['completed_iterations']) <= plan['max_steps_per_point'],
               r['stopping_reason'] in ('gradient_converged', 'step_limit'),
               math.isfinite(float(r['projected_gradient_norm']))]
+    if backend == 'cpu':
+        checks += [r.get('optimization_backend') == 'cpu', true(r.get('validated_cpu')),
+                   true(r.get('cpu_strict_audit_passed')),
+                   r.get('cpu_gpu_agreement') == 'not_checked']
+    else:
+        checks += [r.get('optimization_backend', 'cuda') == 'cuda',
+                   true(r.get('cpu_gpu_agreement'))]
     checkpoint = point / 'warmup_state.jls'
     checks.append(sha(checkpoint) == r['checkpoint_sha256'])
     if r['stopping_reason'] == 'gradient_converged':
@@ -136,18 +143,22 @@ def validate_result(point, h, direction, source_sha, code_sha, plan):
     return r, checkpoint
 
 
-def validate_pilot(point, source_sha, code_sha, steps):
-    audit = last_csv(point / 'initial_cpu_gpu_audit.csv')
+def validate_pilot(point, source_sha, code_sha, steps, backend='cuda'):
+    audit_file = 'initial_cpu_audit.csv' if backend == 'cpu' else 'initial_cpu_gpu_audit.csv'
+    audit = last_csv(point / audit_file)
     bootstrap = last_csv(point / 'bootstrap.csv')
     progress = last_csv(point / 'progress.csv')
     count = int(progress.get('completed_iterations', progress.get('iteration')))
     if not true(audit['passed']) or not true(bootstrap['ctm_converged']):
-        raise RuntimeError('Pilot CPU/GPU or initial CTM check failed')
+        raise RuntimeError('Pilot backend audit or initial CTM check failed')
+    if backend == 'cpu' and not true(audit.get('tight')):
+        raise RuntimeError('CPU pilot requires an actual tight CPU audit')
     if count < steps or not all(math.isfinite(float(progress[k]))
                                 for k in ('energy', 'projected_gradient_norm')):
         raise RuntimeError('Pilot progress incomplete or nonfinite')
     return dict(status='passed', accepted_updates=count, source_sha256=source_sha,
                 code_sha256=code_sha, checkpoint_sha256=sha(point / 'iteration_checkpoint.jls'),
+                optimization_backend=backend, audit_file=audit_file,
                 ctm_check_scope='initial bootstrap; not a per-step residual claim')
 
 
@@ -197,6 +208,7 @@ def main():
     ap.add_argument('--direction', choices=('increasing_h', 'decreasing_h'))
     ap.add_argument('--seed', type=Path)
     ap.add_argument('--julia', default=os.environ.get('JULIA_EXE', 'julia'))
+    ap.add_argument('--backend', choices=('cpu', 'cuda'), default=os.environ.get('TFIM_BACKEND', 'cuda'))
     ap.add_argument('--wall-seconds', type=int, default=85800)
     ap.add_argument('--pilot-steps', type=int, default=2)
     ap.add_argument('--pilot-segment', type=int, default=1)
@@ -254,6 +266,7 @@ def main():
     config = dict(plan=plan, direction=args.direction, seed_path=str(seed),
                   seed_sha256=source_sha, code_sha256=code_sha,
                   seed_recipe=seed_recipe,
+                  optimization_backend=args.backend,
                   code_revision=os.environ.get('TFIM_CODE_REVISION', 'unspecified'))
     immutable_json(branch / 'scan_config.json', config)
     immutable_json(branch / 'source_manifest.json', dict(code_sha256=code_sha, files=files))
@@ -262,7 +275,9 @@ def main():
     pending = []
     job = os.environ['SLURM_JOB_ID']
     pilot_path = branch / 'pilot_validation.json'
-    driver = package / 'production/tfim/run_gs_qr_bidirectional_point.jl'
+    driver_name = ('run_gs_qr_bidirectional_cpu_point.jl' if args.backend == 'cpu'
+                   else 'run_gs_qr_bidirectional_point.jl')
+    driver = package / 'production/tfim' / driver_name
     measurement = package / 'production/tfim/measure_bidirectional_point.jl'
     for index, field in enumerate(plan['directions'][args.direction]):
         if runner.stop_signal or time.time() >= runner.end_time - 300:
@@ -282,6 +297,7 @@ def main():
         env.update(TFIM_SOURCE_STATE=str(source), TFIM_SOURCE_SHA256=source_sha,
                    TFIM_POINT_ROOT=str(point), TFIM_H='%.8f' % h, TFIM_BRANCH=args.direction,
                    TFIM_D=str(plan['D']), TFIM_CTM_CHI=str(plan['chi_opt']),
+                   TFIM_BACKEND=args.backend,
                    TFIM_AD_TOLERANCE=str(plan['ad_tolerance']),
                    TFIM_SOURCE_H=str(parent['h'] if parent else seed_spec['h']),
                    TFIM_BASE_GIT_COMMIT=plan['base_commit'],
@@ -313,8 +329,8 @@ def main():
             previous_count = count
             attempts += 1
             if pilot and count >= args.pilot_steps:
-                atomic_json(pilot_path, validate_pilot(point, source_sha, code_sha, args.pilot_steps))
-        result, checkpoint = validate_result(point, h, args.direction, source_sha, code_sha, plan)
+                atomic_json(pilot_path, validate_pilot(point, source_sha, code_sha, args.pilot_steps, args.backend))
+        result, checkpoint = validate_result(point, h, args.direction, source_sha, code_sha, plan, args.backend)
         if index == 0 and not pilot_path.exists():
             atomic_json(pilot_path, dict(status='passed_via_validated_terminal_endpoint',
                         code_sha256=code_sha, checkpoint_sha256=result['checkpoint_sha256']))

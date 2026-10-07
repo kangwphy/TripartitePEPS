@@ -1,0 +1,13 @@
+# CPU fallback for the fresh QR scan
+
+`run_gs_qr_bidirectional_cpu_point.jl` retains the GPU driver's environment contract, parameter values, accepted-step accounting, per-step checkpoints/history, time/stop-file interruption and exit-42 continuation. It runs only within Slurm. It does not include the CUDA GS support file, adapt to device tensors, call CUDA synchronization, or require a functional GPU. The canonical LMPSVUMPS package itself declares CUDA/cuTENSOR dependencies; its CPU APIs are used here.
+
+The controller selects `TFIM_BACKEND=cpu` and this driver. Required inputs remain `TFIM_SOURCE_STATE`, `TFIM_SOURCE_SHA256`, `TFIM_POINT_ROOT`, `TFIM_H`, `TFIM_BRANCH`, and `TFIM_CODE_SHA256`. Defaults are D3, CTM chi48, projected-gradient threshold 1e-5, maximum 1000 accepted optimizer updates, CTM tol1e-9 and implicit-gradient tol2e-7. Strict CPU evaluation uses CTM tol1e-10/maxiter4800 and implicit-gradient tol2e-8/maxiter400. BLAS threads follow the allocated CPU count.
+
+Fresh endpoint raw PEPS and this campaign's portable final CPU checkpoints are accepted sources. The controller enforces fresh endpoint provenance and the previous-point chain. CPU configuration hashes include `optimization_backend="cpu"`; a GPU-config checkpoint is rejected rather than silently continued. Use an independent CPU pilot/attempt directory for testing.
+
+`initial_cpu_audit.csv` and `endpoint_cpu_audit.csv` record a strict, single energy/gradient evaluation that verifies finite energy/gradient and no optimizer update; explicit CTM convergence is checked before that evaluation. The final saved environment is independently refreshed again, its CTM energy must agree with the strict CPU energy within 1e-8, and energy must not increase from the input evaluated at the same target h. These are CPU solver checks, not CPU/GPU agreement checks.
+
+Terminal `warmup_state.jls`, `final_summary.csv`, `accepted.csv`, `ctm_final_xi.csv`, and `point_result.json` preserve the existing controller/measurement schema. They explicitly report `optimization_backend="cpu"`, `validated_cpu=true`, `cpu_strict_audit_passed=true`, and `cpu_gpu_agreement="not_checked"`. A successful strict audit does not imply the projected gradient is below threshold: a 1000-update endpoint remains `converged=false`, `stopping_reason="step_limit"` when appropriate. The same final PEPS proceeds to the independent CTM/VUMPS measurement driver.
+
+The previous GPU entry point is unchanged. Local Julia syntax parsing passed; CPU update, continuation and terminal behavior still require the Slurm pilot before the full chain runs.
