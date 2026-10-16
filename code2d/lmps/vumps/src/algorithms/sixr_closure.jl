@@ -512,15 +512,28 @@ end
 function m2_solve_specs(specs; nmax=1200, tol=1e-10,
                         far_boundaries=nothing,
                         far_boundary_tolerance=1e-7,
-                        far_boundary_tail_tolerance=1e-9)
+                        far_boundary_tail_tolerance=1e-9,
+                        endpoint_solver=m2_endpoint,
+                        endpoint_options=(;), seam_observer=nothing)
     far_boundaries === nothing || length(far_boundaries) == length(specs) ||
         throw(DimensionMismatch("one far boundary is required per seam spec"))
     Rs = ITensor[]; vertices = Tuple{String,String,Vector{Int}}[]
     infos = NamedTuple[]
     for (j, s) in enumerate(specs)
         far = far_boundaries === nothing ? nothing : far_boundaries[j]
-        e = m2_endpoint(s.Ts; nmax, tol, far_boundary=far,
-                        far_boundary_tolerance, far_boundary_tail_tolerance)
+        # Preserve the historical call, defaults and numerical path verbatim.
+        # Alternative cap-selected solvers must be requested explicitly.
+        e = if endpoint_solver === m2_endpoint
+            isempty(endpoint_options) || throw(ArgumentError(
+                "endpoint_options require an explicitly selected endpoint_solver"))
+            e = m2_endpoint(s.Ts; nmax, tol, far_boundary=far,
+                            far_boundary_tolerance, far_boundary_tail_tolerance)
+        else
+            endpoint_solver(s.Ts; nmax, tol, far_boundary=far,
+                            far_boundary_tolerance, far_boundary_tail_tolerance,
+                            endpoint_options...)
+        end
+        seam_observer === nothing || seam_observer(s, far, e)
         push!(Rs, ITensor(e.R, s.lefts...))
         push!(vertices, (s.Xn, s.Yn, s.cyc))
         push!(infos, (; residual=e.residual, gap=e.gap, iters=e.iters,
@@ -868,7 +881,9 @@ function m2_contract_shared_six_R(rails, D::Int;
                                   far_boundary_tolerance::Real=1e-7,
                                   far_boundary_tail_tolerance::Real=1e-9,
                                   verbose::Bool=true,
-                                  hinges=Dict{String,Matrix{Float64}}())
+                                  hinges=Dict{String,Matrix{Float64}}(),
+                                  endpoint_solver=m2_endpoint,
+                                  endpoint_options=(;), seam_observer=nothing)
     isfinite(scale_tolerance) && scale_tolerance > 0 ||
         throw(ArgumentError("scale_tolerance must be finite and positive"))
     isfinite(far_boundary_tolerance) && far_boundary_tolerance > 0 ||
@@ -881,7 +896,8 @@ function m2_contract_shared_six_R(rails, D::Int;
     seamsec = @elapsed begin
         Rs1, vertices1, infos1 = m2_solve_specs(
             specs1; nmax, tol, far_boundary_tolerance,
-            far_boundary_tail_tolerance)
+            far_boundary_tail_tolerance, endpoint_solver, endpoint_options,
+            seam_observer)
         metric_sources = Dict(specs1[j].seam =>
                               (; R=Rs1[j], spec=specs1[j], info=infos1[j])
                               for j in eachindex(specs1))
@@ -890,7 +906,8 @@ function m2_contract_shared_six_R(rails, D::Int;
         Rs4, vertices4, infos4 =
             m2_solve_specs(specs4; nmax, tol, far_boundaries=far4,
                            far_boundary_tolerance,
-                           far_boundary_tail_tolerance)
+                           far_boundary_tail_tolerance, endpoint_solver,
+                           endpoint_options, seam_observer)
     end
     length(Rs4) == 6 || error("expected exactly six rank-four endpoints")
     length(Rs1) == 3 || error("expected exactly three rank-two seam metrics")

@@ -19,6 +19,7 @@ import cuTENSOR
 include("algorithms/state.jl")
 include("models/rk_ising.jl")
 include("algorithms/sixr_closure.jl")
+include("algorithms/sixr_cap_selected.jl")
 include("algorithms/direct_route.jl")
 include("algorithms/boundary.jl")
 include("models/rk_ising_observables.jl")
